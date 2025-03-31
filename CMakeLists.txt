@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.15)
 
-project(bouncing_ball)
+project(n-body-simulator)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
@@ -32,8 +32,8 @@ find_package(Vulkan REQUIRED)
 
 add_subdirectory(VulkanMemoryAllocator)
 
-add_executable(bouncing_ball main.cpp ${SHADER_HEADERS})
+add_executable(n-body-simulator main.cpp ${SHADER_HEADERS})
 
-add_dependencies(bouncing_ball glfw Vulkan::Vulkan shaders_headers)
+add_dependencies(n-body-simulator glfw Vulkan::Vulkan shaders_headers)
 
-target_link_libraries(bouncing_ball glfw Vulkan::Vulkan GPUOpen::VulkanMemoryAllocator)
+target_link_libraries(n-body-simulator glfw Vulkan::Vulkan GPUOpen::VulkanMemoryAllocator)
