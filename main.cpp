@@ -18,6 +18,14 @@ class NBodySimulator {
         VmaAllocator m_allocator;
         vk::CommandPool m_commandPool;
         vk::CommandBuffer m_commandBuffer;
+        vk::Buffer m_vertexBuffer;
+        VmaAllocation m_vertexBufferAllocation;
+        vk::Buffer m_indexBuffer;
+        VmaAllocation m_indexBufferAllocation;
+        vk::Buffer m_bodyPositionBuffers[2];
+        VmaAllocation m_bodyPositionBufferAllocations[2];
+        vk::Buffer m_bodyVelocityBuffers[2];
+        VmaAllocation m_bodyVelocityBufferAllocations[2];
         void createInstance() {
             VULKAN_HPP_DEFAULT_DISPATCHER.init();
             vk::ApplicationInfo appInfo{};
