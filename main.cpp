@@ -154,6 +154,46 @@ class NBodySimulator {
                             &m_indexBufferAllocation, &info);
             m_mappedIndexBuffer = info.pMappedData;
         };
+        void createBodyPositionBuffers(){
+            vk::BufferCreateInfo bufferInfo{};
+            bufferInfo.size = sizeof(float) * 2 * 1000;
+            bufferInfo.usage = vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eVertexBuffer;
+            VmaAllocationCreateInfo allocInfo{};
+            allocInfo.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
+            if(m_physicalDeviceType == vk::PhysicalDeviceType::eDiscreteGpu) {
+                bufferInfo.usage |= vk::BufferUsageFlagBits::eTransferDst;
+            }else{
+                allocInfo.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT;
+            }
+            VmaAllocationInfo info{};
+            for (int i = 0; i < 2; ++i) {
+                vmaCreateBuffer(m_allocator, reinterpret_cast<VkBufferCreateInfo*>(&bufferInfo),
+                                reinterpret_cast<VmaAllocationCreateInfo*>(&allocInfo),
+                                reinterpret_cast<VkBuffer*>(&m_bodyPositionBuffers[i]),
+                                &m_bodyPositionBufferAllocations[i], &info);
+                m_mappedBodyPositionBuffers[i] = info.pMappedData;
+            }
+        };
+        void createBodyVelocityBuffers(){
+            vk::BufferCreateInfo bufferInfo{};
+            bufferInfo.size = sizeof(float) * 2 * 1000;
+            bufferInfo.usage = vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eVertexBuffer;
+            VmaAllocationCreateInfo allocInfo{};
+            allocInfo.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
+            if(m_physicalDeviceType == vk::PhysicalDeviceType::eDiscreteGpu) {
+                bufferInfo.usage |= vk::BufferUsageFlagBits::eTransferDst;
+            }else{
+                allocInfo.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT;
+            }
+            VmaAllocationInfo info{};
+            for (int i = 0; i < 2; ++i) {
+                vmaCreateBuffer(m_allocator, reinterpret_cast<VkBufferCreateInfo*>(&bufferInfo),
+                                reinterpret_cast<VmaAllocationCreateInfo*>(&allocInfo),
+                                reinterpret_cast<VkBuffer*>(&m_bodyVelocityBuffers[i]),
+                                &m_bodyVelocityBufferAllocations[i], &info);
+                m_mappedBodyVelocityBuffers[i] = info.pMappedData;
+            }
+        };
     public:
         NBodySimulator() {
             createInstance();
@@ -164,8 +204,14 @@ class NBodySimulator {
             createCommandBuffer();
             createVertexBuffer();
             createIndexBuffer();
+            createBodyPositionBuffers();
+            createBodyVelocityBuffers();
         }
         ~NBodySimulator() {
+            for (int i = 0; i < 2; ++i) {
+                vmaDestroyBuffer(m_allocator, m_bodyPositionBuffers[i], m_bodyPositionBufferAllocations[i]);
+                vmaDestroyBuffer(m_allocator, m_bodyVelocityBuffers[i], m_bodyVelocityBufferAllocations[i]);
+            }
             vmaDestroyBuffer(m_allocator, m_indexBuffer, m_indexBufferAllocation);
             vmaDestroyBuffer(m_allocator, m_vertexBuffer, m_vertexBufferAllocation);
             m_device.destroyCommandPool(m_commandPool);
