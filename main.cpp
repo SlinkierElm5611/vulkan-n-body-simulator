@@ -93,14 +93,30 @@ class NBodySimulator {
             allocatorInfo.instance = m_instance;
             vmaCreateAllocator(&allocatorInfo, &m_allocator);
         }
+        void createCommandPool() {
+            vk::CommandPoolCreateInfo createInfo{};
+            createInfo.queueFamilyIndex = 0;
+            createInfo.flags = vk::CommandPoolCreateFlagBits::eResetCommandBuffer;
+            m_commandPool = m_device.createCommandPool(createInfo);
+        }
+        void createCommandBuffer() {
+            vk::CommandBufferAllocateInfo allocateInfo{};
+            allocateInfo.commandPool = m_commandPool;
+            allocateInfo.level = vk::CommandBufferLevel::ePrimary;
+            allocateInfo.commandBufferCount = 1;
+            m_commandBuffer = m_device.allocateCommandBuffers(allocateInfo)[0];
+        }
     public:
         NBodySimulator() {
             createInstance();
             createPhysicalDevice();
             createDevice();
             createAllocator();
+            createCommandPool();
+            createCommandBuffer();
         }
         ~NBodySimulator() {
+            m_device.destroyCommandPool(m_commandPool);
             vmaDestroyAllocator(m_allocator);
             m_device.destroy();
             m_instance.destroy();
