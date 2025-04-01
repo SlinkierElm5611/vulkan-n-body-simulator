@@ -67,6 +67,7 @@ class NBodySimulator {
         void createDevice() {
             std::vector<const char*> deviceExtensions = {
                 VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+                VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME,
                 "VK_KHR_portability_subset",
             };
             std::vector<vk::DeviceQueueCreateInfo> queueCreateInfos;
