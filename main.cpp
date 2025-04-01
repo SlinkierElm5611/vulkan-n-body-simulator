@@ -20,12 +20,16 @@ class NBodySimulator {
         vk::CommandBuffer m_commandBuffer;
         vk::Buffer m_vertexBuffer;
         VmaAllocation m_vertexBufferAllocation;
+        void* m_mappedVertexBuffer;
         vk::Buffer m_indexBuffer;
         VmaAllocation m_indexBufferAllocation;
+        void* m_mappedIndexBuffer;
         vk::Buffer m_bodyPositionBuffers[2];
         VmaAllocation m_bodyPositionBufferAllocations[2];
+        void* m_mappedBodyPositionBuffers[2];
         vk::Buffer m_bodyVelocityBuffers[2];
         VmaAllocation m_bodyVelocityBufferAllocations[2];
+        void* m_mappedBodyVelocityBuffers[2];
         void createInstance() {
             VULKAN_HPP_DEFAULT_DISPATCHER.init();
             vk::ApplicationInfo appInfo{};
@@ -114,6 +118,42 @@ class NBodySimulator {
             allocateInfo.commandBufferCount = 1;
             m_commandBuffer = m_device.allocateCommandBuffers(allocateInfo)[0];
         }
+        void createVertexBuffer() {
+            vk::BufferCreateInfo bufferInfo{};
+            bufferInfo.size = sizeof(float) * 2 * 301;
+            bufferInfo.usage = vk::BufferUsageFlagBits::eVertexBuffer;
+            VmaAllocationCreateInfo allocInfo{};
+            allocInfo.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
+            if(m_physicalDeviceType == vk::PhysicalDeviceType::eDiscreteGpu) {
+                bufferInfo.usage |= vk::BufferUsageFlagBits::eTransferDst;
+            }else{
+                allocInfo.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT;
+            }
+            VmaAllocationInfo info{};
+            vmaCreateBuffer(m_allocator, reinterpret_cast<VkBufferCreateInfo*>(&bufferInfo),
+                            reinterpret_cast<VmaAllocationCreateInfo*>(&allocInfo),
+                            reinterpret_cast<VkBuffer*>(&m_vertexBuffer),
+                            &m_vertexBufferAllocation, &info);
+            m_mappedVertexBuffer = info.pMappedData;
+        }
+        void createIndexBuffer() {
+            vk::BufferCreateInfo bufferInfo{};
+            bufferInfo.size = sizeof(uint32_t) * 3 * 300;
+            bufferInfo.usage = vk::BufferUsageFlagBits::eIndexBuffer;
+            VmaAllocationCreateInfo allocInfo{};
+            allocInfo.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
+            if(m_physicalDeviceType == vk::PhysicalDeviceType::eDiscreteGpu) {
+                bufferInfo.usage |= vk::BufferUsageFlagBits::eTransferDst;
+            }else{
+                allocInfo.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT;
+            }
+            VmaAllocationInfo info{};
+            vmaCreateBuffer(m_allocator, reinterpret_cast<VkBufferCreateInfo*>(&bufferInfo),
+                            reinterpret_cast<VmaAllocationCreateInfo*>(&allocInfo),
+                            reinterpret_cast<VkBuffer*>(&m_indexBuffer),
+                            &m_indexBufferAllocation, &info);
+            m_mappedIndexBuffer = info.pMappedData;
+        };
     public:
         NBodySimulator() {
             createInstance();
@@ -122,8 +162,12 @@ class NBodySimulator {
             createAllocator();
             createCommandPool();
             createCommandBuffer();
+            createVertexBuffer();
+            createIndexBuffer();
         }
         ~NBodySimulator() {
+            vmaDestroyBuffer(m_allocator, m_indexBuffer, m_indexBufferAllocation);
+            vmaDestroyBuffer(m_allocator, m_vertexBuffer, m_vertexBufferAllocation);
             m_device.destroyCommandPool(m_commandPool);
             vmaDestroyAllocator(m_allocator);
             m_device.destroy();
