@@ -8,6 +8,8 @@
 
 VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
 
+#define NUMBER_OF_STATES 2
+
 class NBodySimulator {
     private:
         vk::Instance m_instance;
@@ -24,12 +26,15 @@ class NBodySimulator {
         vk::Buffer m_indexBuffer;
         VmaAllocation m_indexBufferAllocation;
         void* m_mappedIndexBuffer;
-        vk::Buffer m_bodyPositionBuffers[2];
-        VmaAllocation m_bodyPositionBufferAllocations[2];
-        void* m_mappedBodyPositionBuffers[2];
-        vk::Buffer m_bodyVelocityBuffers[2];
-        VmaAllocation m_bodyVelocityBufferAllocations[2];
-        void* m_mappedBodyVelocityBuffers[2];
+        vk::Buffer m_bodyPositionBuffers[NUMBER_OF_STATES];
+        VmaAllocation m_bodyPositionBufferAllocations[NUMBER_OF_STATES];
+        void* m_mappedBodyPositionBuffers[NUMBER_OF_STATES];
+        vk::Buffer m_bodyVelocityBuffers[NUMBER_OF_STATES];
+        VmaAllocation m_bodyVelocityBufferAllocations[NUMBER_OF_STATES];
+        void* m_mappedBodyVelocityBuffers[NUMBER_OF_STATES];
+        vk::Buffer m_stagingBuffer;
+        VmaAllocation m_stagingBufferAllocation;
+        void* m_mappedStagingBuffer;
         void createInstance() {
             VULKAN_HPP_DEFAULT_DISPATCHER.init();
             vk::ApplicationInfo appInfo{};
@@ -186,13 +191,27 @@ class NBodySimulator {
                 allocInfo.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT;
             }
             VmaAllocationInfo info{};
-            for (int i = 0; i < 2; ++i) {
+            for (int i = 0; i < NUMBER_OF_STATES; ++i) {
                 vmaCreateBuffer(m_allocator, reinterpret_cast<VkBufferCreateInfo*>(&bufferInfo),
                                 reinterpret_cast<VmaAllocationCreateInfo*>(&allocInfo),
                                 reinterpret_cast<VkBuffer*>(&m_bodyVelocityBuffers[i]),
                                 &m_bodyVelocityBufferAllocations[i], &info);
                 m_mappedBodyVelocityBuffers[i] = info.pMappedData;
             }
+        };
+        void createStagingBuffer() {
+            vk::BufferCreateInfo bufferInfo{};
+            bufferInfo.size = sizeof(float) * 2 * 1000;
+            bufferInfo.usage = vk::BufferUsageFlagBits::eTransferSrc;
+            VmaAllocationCreateInfo allocInfo{};
+            allocInfo.usage = VMA_MEMORY_USAGE_AUTO_PREFER_HOST;
+            allocInfo.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT;
+            VmaAllocationInfo info{};
+            vmaCreateBuffer(m_allocator, reinterpret_cast<VkBufferCreateInfo*>(&bufferInfo),
+                            reinterpret_cast<VmaAllocationCreateInfo*>(&allocInfo),
+                            reinterpret_cast<VkBuffer*>(&m_stagingBuffer),
+                            &m_stagingBufferAllocation, &info);
+            m_mappedStagingBuffer = info.pMappedData;
         };
     public:
         NBodySimulator() {
@@ -206,9 +225,15 @@ class NBodySimulator {
             createIndexBuffer();
             createBodyPositionBuffers();
             createBodyVelocityBuffers();
+            if (m_physicalDeviceType == vk::PhysicalDeviceType::eDiscreteGpu) {
+                createStagingBuffer();
+            }
         }
         ~NBodySimulator() {
-            for (int i = 0; i < 2; ++i) {
+            if (m_physicalDeviceType == vk::PhysicalDeviceType::eDiscreteGpu) {
+                vmaDestroyBuffer(m_allocator, m_stagingBuffer, m_stagingBufferAllocation);
+            }
+            for (int i = 0; i < NUMBER_OF_STATES; ++i) {
                 vmaDestroyBuffer(m_allocator, m_bodyPositionBuffers[i], m_bodyPositionBufferAllocations[i]);
                 vmaDestroyBuffer(m_allocator, m_bodyVelocityBuffers[i], m_bodyVelocityBufferAllocations[i]);
             }
