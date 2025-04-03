@@ -5,6 +5,7 @@
 #define VULKAN_HPP_DISPATCH_LOADER_DYNAMIC 1
 #include <vulkan/vulkan.hpp>
 #include <vector>
+#include "comp.h"
 
 VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
 
@@ -43,6 +44,10 @@ class NBodySimulator {
         vk::Semaphore m_stateSemaphores[NUMBER_OF_STATES];
         vk::Semaphore m_imageAvailableSemaphores[NUMBER_OF_STATES];
         vk::Fence m_inFlightFences[NUMBER_OF_STATES];
+        vk::DescriptorSetLayout m_computeDescriptorSetLayout;
+        vk::PipelineLayout m_computePipelineLayout;
+        vk::Pipeline m_computePipeline;
+        vk::PipelineCache m_computePipelineCache;
         void createInstance() {
             VULKAN_HPP_DEFAULT_DISPATCHER.init();
             vk::ApplicationInfo appInfo{};
@@ -139,7 +144,7 @@ class NBodySimulator {
         }
         void createVertexBuffer() {
             vk::BufferCreateInfo bufferInfo{};
-            bufferInfo.size = sizeof(float) * 2 * 301;
+            bufferInfo.size = sizeof(float) * 2 * 11;
             bufferInfo.usage = vk::BufferUsageFlagBits::eVertexBuffer;
             VmaAllocationCreateInfo allocInfo{};
             allocInfo.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
@@ -157,7 +162,7 @@ class NBodySimulator {
         }
         void createIndexBuffer() {
             vk::BufferCreateInfo bufferInfo{};
-            bufferInfo.size = sizeof(uint32_t) * 3 * 300;
+            bufferInfo.size = sizeof(uint32_t) * 3 * 10;
             bufferInfo.usage = vk::BufferUsageFlagBits::eIndexBuffer;
             VmaAllocationCreateInfo allocInfo{};
             allocInfo.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
@@ -244,6 +249,52 @@ class NBodySimulator {
                 m_stateSemaphores[i] = m_device.createSemaphore(stateSemaphoreCreateInfo);
             }
         };
+        void createComputDescriptorSetLayout(){
+            vk::DescriptorSetLayoutBinding bindings[2];
+            bindings[0].binding = 0;
+            bindings[0].descriptorType = vk::DescriptorType::eStorageBuffer;
+            bindings[0].descriptorCount = 1;
+            bindings[0].stageFlags = vk::ShaderStageFlagBits::eCompute;
+            bindings[0].pImmutableSamplers = nullptr;
+            bindings[1].binding = 1;
+            bindings[1].descriptorType = vk::DescriptorType::eStorageBuffer;
+            bindings[1].descriptorCount = 1;
+            bindings[1].stageFlags = vk::ShaderStageFlagBits::eCompute;
+            bindings[1].pImmutableSamplers = nullptr;
+            vk::DescriptorSetLayoutCreateInfo createInfo{};
+            createInfo.bindingCount = 2;
+            createInfo.pBindings = bindings;
+            createInfo.flags = vk::DescriptorSetLayoutCreateFlagBits::ePushDescriptor;
+            m_computeDescriptorSetLayout = m_device.createDescriptorSetLayout(createInfo);
+        };
+        void createComputePipelineLayout(){
+            vk::PipelineLayoutCreateInfo createInfo{};
+            createInfo.setLayoutCount = 1;
+            createInfo.pSetLayouts = &m_computeDescriptorSetLayout;
+            vk::PushConstantRange pushConstantInfo{};
+            pushConstantInfo.offset = 0;
+            pushConstantInfo.size = sizeof(uint32_t);
+            pushConstantInfo.stageFlags = vk::ShaderStageFlagBits::eCompute;
+            createInfo.pushConstantRangeCount = 1;
+            createInfo.pPushConstantRanges = &pushConstantInfo;
+            m_computePipelineLayout = m_device.createPipelineLayout(createInfo);
+        };
+        void createComputePipeline(){
+            vk::ShaderModuleCreateInfo shaderModuleInfo{};
+            shaderModuleInfo.codeSize = comp_spv_len;
+            shaderModuleInfo.pCode = reinterpret_cast<const uint32_t*>(comp_spv);
+            vk::ShaderModule shaderModule = m_device.createShaderModule(shaderModuleInfo);
+            vk::PipelineShaderStageCreateInfo shaderStageInfo{};
+            shaderStageInfo.stage = vk::ShaderStageFlagBits::eCompute;
+            shaderStageInfo.module = shaderModule;
+            shaderStageInfo.pName = "main";
+            shaderStageInfo.pSpecializationInfo = nullptr;
+            vk::ComputePipelineCreateInfo pipelineInfo{};
+            pipelineInfo.stage = shaderStageInfo;
+            pipelineInfo.layout = m_computePipelineLayout;
+            m_computePipeline = m_device.createComputePipeline(m_computePipelineCache, pipelineInfo).value;
+            m_device.destroyShaderModule(shaderModule);
+        };
     public:
         NBodySimulator() {
             createInstance();
@@ -260,9 +311,15 @@ class NBodySimulator {
                 createStagingBuffer();
             }
             createSyncObjects();
+            createComputDescriptorSetLayout();
+            createComputePipelineLayout();
+            createComputePipeline();
         }
         ~NBodySimulator() {
             m_device.waitIdle();
+            m_device.destroyPipeline(m_computePipeline);
+            m_device.destroyPipelineLayout(m_computePipelineLayout);
+            m_device.destroyDescriptorSetLayout(m_computeDescriptorSetLayout);
             if (m_physicalDeviceType == vk::PhysicalDeviceType::eDiscreteGpu) {
                 vmaDestroyBuffer(m_allocator, m_stagingBuffer, m_stagingBufferAllocation);
             }
