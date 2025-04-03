@@ -9,6 +9,9 @@
 VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
 
 #define NUMBER_OF_STATES 2
+#define STATE_READY_FOR_COMPUTE 0
+#define STATE_READY_FOR_RENDER 1
+#define STATE_READY_FOR_SOURCE_OF_NEXT_COMPUTE 2
 
 class NBodySimulator {
     private:
@@ -35,6 +38,11 @@ class NBodySimulator {
         vk::Buffer m_stagingBuffer;
         VmaAllocation m_stagingBufferAllocation;
         void* m_mappedStagingBuffer;
+        uint8_t m_currentState = 0;
+        uint8_t m_nextState = 1;
+        vk::Semaphore m_stateSemaphores[NUMBER_OF_STATES];
+        vk::Semaphore m_imageAvailableSemaphores[NUMBER_OF_STATES];
+        vk::Fence m_inFlightFences[NUMBER_OF_STATES];
         void createInstance() {
             VULKAN_HPP_DEFAULT_DISPATCHER.init();
             vk::ApplicationInfo appInfo{};
@@ -82,6 +90,10 @@ class NBodySimulator {
             }
         }
         void createDevice() {
+            vk::PhysicalDeviceVulkan12Features features12{};
+            features12.setTimelineSemaphore(VK_TRUE);
+            vk::PhysicalDeviceFeatures2 features{};
+            features.setPNext(&features12);
             std::vector<const char*> deviceExtensions = {
                 VK_KHR_SWAPCHAIN_EXTENSION_NAME,
                 VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME,
@@ -89,6 +101,7 @@ class NBodySimulator {
             };
             std::vector<vk::DeviceQueueCreateInfo> queueCreateInfos;
             std::vector<float> queuePriorities = {1.0f};
+            std::vector<vk::PhysicalDeviceFeatures> deviceFeatures;
             vk::DeviceQueueCreateInfo queueCreateInfo{};
             queueCreateInfo.queueFamilyIndex = 0;
             queueCreateInfo.queueCount = 1;
@@ -99,6 +112,7 @@ class NBodySimulator {
             createInfo.pQueueCreateInfos = queueCreateInfos.data();
             createInfo.enabledExtensionCount = static_cast<uint32_t>(deviceExtensions.size());
             createInfo.ppEnabledExtensionNames = deviceExtensions.data();
+            createInfo.pNext = &features;
             m_device = m_physicalDevice.createDevice(createInfo);
             m_queue = m_device.getQueue(0, 0);
             VULKAN_HPP_DEFAULT_DISPATCHER.init(m_device);
@@ -213,6 +227,23 @@ class NBodySimulator {
                             &m_stagingBufferAllocation, &info);
             m_mappedStagingBuffer = info.pMappedData;
         };
+        void createSyncObjects(){
+            vk::FenceCreateInfo fenceInfo{};
+            fenceInfo.flags = vk::FenceCreateFlagBits::eSignaled;
+            vk::SemaphoreCreateInfo semaphoreInfo{};
+            for (int i = 0; i < NUMBER_OF_STATES; ++i) {
+                m_imageAvailableSemaphores[i] = m_device.createSemaphore(semaphoreInfo);
+                m_inFlightFences[i] = m_device.createFence(fenceInfo);
+            }
+            vk::SemaphoreCreateInfo stateSemaphoreCreateInfo{};
+            vk::SemaphoreTypeCreateInfo stateSemaphoreTypeCreateInfo{};
+            stateSemaphoreTypeCreateInfo.semaphoreType = vk::SemaphoreType::eTimeline;
+            stateSemaphoreTypeCreateInfo.initialValue = STATE_READY_FOR_COMPUTE;
+            stateSemaphoreCreateInfo.pNext = &stateSemaphoreTypeCreateInfo;
+            for (int i = 0; i < NUMBER_OF_STATES; ++i) {
+                m_stateSemaphores[i] = m_device.createSemaphore(stateSemaphoreCreateInfo);
+            }
+        };
     public:
         NBodySimulator() {
             createInstance();
@@ -228,12 +259,17 @@ class NBodySimulator {
             if (m_physicalDeviceType == vk::PhysicalDeviceType::eDiscreteGpu) {
                 createStagingBuffer();
             }
+            createSyncObjects();
         }
         ~NBodySimulator() {
+            m_device.waitIdle();
             if (m_physicalDeviceType == vk::PhysicalDeviceType::eDiscreteGpu) {
                 vmaDestroyBuffer(m_allocator, m_stagingBuffer, m_stagingBufferAllocation);
             }
             for (int i = 0; i < NUMBER_OF_STATES; ++i) {
+                m_device.destroySemaphore(m_stateSemaphores[i]);
+                m_device.destroySemaphore(m_imageAvailableSemaphores[i]);
+                m_device.destroyFence(m_inFlightFences[i]);
                 vmaDestroyBuffer(m_allocator, m_bodyPositionBuffers[i], m_bodyPositionBufferAllocations[i]);
                 vmaDestroyBuffer(m_allocator, m_bodyVelocityBuffers[i], m_bodyVelocityBufferAllocations[i]);
             }
