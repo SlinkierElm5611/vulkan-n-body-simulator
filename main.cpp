@@ -250,19 +250,15 @@ class NBodySimulator {
             }
         };
         void createComputDescriptorSetLayout(){
-            vk::DescriptorSetLayoutBinding bindings[2];
-            bindings[0].binding = 0;
-            bindings[0].descriptorType = vk::DescriptorType::eStorageBuffer;
-            bindings[0].descriptorCount = 1;
-            bindings[0].stageFlags = vk::ShaderStageFlagBits::eCompute;
-            bindings[0].pImmutableSamplers = nullptr;
-            bindings[1].binding = 1;
-            bindings[1].descriptorType = vk::DescriptorType::eStorageBuffer;
-            bindings[1].descriptorCount = 1;
-            bindings[1].stageFlags = vk::ShaderStageFlagBits::eCompute;
-            bindings[1].pImmutableSamplers = nullptr;
+            vk::DescriptorSetLayoutBinding bindings[4];
+            for(uint8_t i=0; i<4; i++){
+                bindings[i].binding = i;
+                bindings[i].descriptorType = vk::DescriptorType::eStorageBuffer;
+                bindings[i].descriptorCount = 1;
+                bindings[i].stageFlags = vk::ShaderStageFlagBits::eCompute;
+            }
             vk::DescriptorSetLayoutCreateInfo createInfo{};
-            createInfo.bindingCount = 2;
+            createInfo.bindingCount = 4;
             createInfo.pBindings = bindings;
             createInfo.flags = vk::DescriptorSetLayoutCreateFlagBits::ePushDescriptor;
             m_computeDescriptorSetLayout = m_device.createDescriptorSetLayout(createInfo);
@@ -273,7 +269,7 @@ class NBodySimulator {
             createInfo.pSetLayouts = &m_computeDescriptorSetLayout;
             vk::PushConstantRange pushConstantInfo{};
             pushConstantInfo.offset = 0;
-            pushConstantInfo.size = sizeof(uint32_t);
+            pushConstantInfo.size = sizeof(uint32_t) + sizeof(float);
             pushConstantInfo.stageFlags = vk::ShaderStageFlagBits::eCompute;
             createInfo.pushConstantRangeCount = 1;
             createInfo.pPushConstantRanges = &pushConstantInfo;
