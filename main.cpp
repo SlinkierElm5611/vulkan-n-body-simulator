@@ -6,6 +6,8 @@
 #include <vulkan/vulkan.hpp>
 #include <vector>
 #include "comp.h"
+#include "vert.h"
+#include "frag.h"
 
 VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
 
@@ -48,6 +50,10 @@ class NBodySimulator {
         vk::PipelineLayout m_computePipelineLayout;
         vk::Pipeline m_computePipeline;
         vk::PipelineCache m_computePipelineCache;
+        vk::RenderPass m_renderPass;
+        vk::PipelineLayout m_graphicsPipelineLayout;
+        vk::Pipeline m_graphicsPipeline;
+        vk::PipelineCache m_graphicsPipelineCache;
         void createInstance() {
             VULKAN_HPP_DEFAULT_DISPATCHER.init();
             vk::ApplicationInfo appInfo{};
@@ -291,6 +297,155 @@ class NBodySimulator {
             m_computePipeline = m_device.createComputePipeline(m_computePipelineCache, pipelineInfo).value;
             m_device.destroyShaderModule(shaderModule);
         };
+        void createRenderPass(){
+            vk::AttachmentDescription colourAttachment{};
+            colourAttachment.format = vk::Format::eR8G8B8A8Srgb;
+            colourAttachment.samples = vk::SampleCountFlagBits::e1;
+            colourAttachment.loadOp = vk::AttachmentLoadOp::eClear;
+            colourAttachment.storeOp = vk::AttachmentStoreOp::eStore;
+            colourAttachment.stencilLoadOp = vk::AttachmentLoadOp::eDontCare;
+            colourAttachment.stencilStoreOp = vk::AttachmentStoreOp::eDontCare;
+            colourAttachment.initialLayout = vk::ImageLayout::eUndefined;
+            colourAttachment.finalLayout = vk::ImageLayout::ePresentSrcKHR;
+            vk::AttachmentReference colourAttachmentRef{};
+            colourAttachmentRef.attachment = 0;
+            colourAttachmentRef.layout = vk::ImageLayout::eColorAttachmentOptimal;
+            vk::SubpassDescription subpass{};
+            subpass.pipelineBindPoint = vk::PipelineBindPoint::eGraphics;
+            subpass.colorAttachmentCount = 1;
+            subpass.pColorAttachments = &colourAttachmentRef;
+            vk::SubpassDependency dependency{};
+            dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+            dependency.dstSubpass = 0;
+            dependency.srcStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput;
+            dependency.srcAccessMask = vk::AccessFlagBits::eColorAttachmentWrite;
+            dependency.dstStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput;
+            dependency.dstAccessMask = vk::AccessFlagBits::eColorAttachmentRead;
+            vk::RenderPassCreateInfo renderPassInfo{};
+            renderPassInfo.attachmentCount = 1;
+            renderPassInfo.pAttachments = &colourAttachment;
+            renderPassInfo.subpassCount = 1;
+            renderPassInfo.pSubpasses = &subpass;
+            renderPassInfo.dependencyCount = 1;
+            renderPassInfo.pDependencies = &dependency;
+            m_renderPass = m_device.createRenderPass(renderPassInfo);
+        };
+        void createGraphicsPipelineLayout(){
+            vk::PipelineLayoutCreateInfo createInfo{};
+            m_graphicsPipelineLayout = m_device.createPipelineLayout(createInfo);
+        };
+        void createGraphicsPipeline(){
+            vk::PipelineShaderStageCreateInfo shaderStages[2];
+            vk::ShaderModuleCreateInfo vertShaderModuleInfo{};
+            vertShaderModuleInfo.codeSize = vert_spv_len;
+            vertShaderModuleInfo.pCode = reinterpret_cast<const uint32_t*>(vert_spv);
+            vk::ShaderModule vertShaderModule = m_device.createShaderModule(vertShaderModuleInfo);
+            shaderStages[0].stage = vk::ShaderStageFlagBits::eVertex;
+            shaderStages[0].module = vertShaderModule;
+            shaderStages[0].pName = "main";
+            vk::ShaderModuleCreateInfo fragShaderModuleInfo{};
+            fragShaderModuleInfo.codeSize = frag_spv_len;
+            fragShaderModuleInfo.pCode = reinterpret_cast<const uint32_t*>(frag_spv);
+            vk::ShaderModule fragShaderModule = m_device.createShaderModule(fragShaderModuleInfo);
+            shaderStages[1].stage = vk::ShaderStageFlagBits::eFragment;
+            shaderStages[1].module = fragShaderModule;
+            shaderStages[1].pName = "main";
+            vk::PipelineVertexInputStateCreateInfo vertexInputInfo{};
+            vertexInputInfo.vertexBindingDescriptionCount = 2;
+            vk::VertexInputBindingDescription bindingDescriptions[2];
+            bindingDescriptions[0].binding = 0;
+            bindingDescriptions[0].stride = sizeof(float) * 2;
+            bindingDescriptions[0].inputRate = vk::VertexInputRate::eVertex;
+            bindingDescriptions[1].binding = 1;
+            bindingDescriptions[1].stride = sizeof(float) * 2;
+            bindingDescriptions[1].inputRate = vk::VertexInputRate::eInstance;
+            vk::VertexInputAttributeDescription attributeDescriptions[2];
+            attributeDescriptions[0].binding = 0;
+            attributeDescriptions[0].location = 0;
+            attributeDescriptions[0].format = vk::Format::eR32G32Sfloat;
+            attributeDescriptions[0].offset = 0;
+            attributeDescriptions[1].binding = 1;
+            attributeDescriptions[1].location = 1;
+            attributeDescriptions[1].format = vk::Format::eR32G32Sfloat;
+            attributeDescriptions[1].offset = 0;
+            vertexInputInfo.pVertexBindingDescriptions = bindingDescriptions;
+            vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptions;
+            vertexInputInfo.vertexBindingDescriptionCount = 2;
+            vertexInputInfo.vertexAttributeDescriptionCount = 2;
+            vk::PipelineInputAssemblyStateCreateInfo inputAssembly{};
+            inputAssembly.topology = vk::PrimitiveTopology::eTriangleList;
+            inputAssembly.primitiveRestartEnable = VK_FALSE;
+            vk::Viewport viewport{};
+            viewport.x = 0.0f;
+            viewport.y = 0.0f;
+            viewport.width = 800.0f;
+            viewport.height = 600.0f;
+            viewport.minDepth = 0.0f;
+            viewport.maxDepth = 1.0f;
+            vk::Rect2D scissor{{0, 0}, {800, 600}};
+            vk::PipelineViewportStateCreateInfo viewportState{};
+            viewportState.viewportCount = 1;
+            viewportState.pViewports = &viewport;
+            viewportState.scissorCount = 1;
+            viewportState.pScissors = &scissor;
+            vk::PipelineRasterizationStateCreateInfo rasterizer{};
+            rasterizer.depthClampEnable = VK_FALSE;
+            rasterizer.rasterizerDiscardEnable = VK_FALSE;
+            rasterizer.polygonMode = vk::PolygonMode::eFill;
+            rasterizer.lineWidth = 1.0f;
+            rasterizer.cullMode = vk::CullModeFlagBits::eBack;
+            rasterizer.frontFace = vk::FrontFace::eCounterClockwise;
+            rasterizer.depthBiasEnable = VK_FALSE;
+            rasterizer.depthBiasConstantFactor = 0.0f;
+            rasterizer.depthBiasClamp = 0.0f;
+            rasterizer.depthBiasSlopeFactor = 0.0f;
+            vk::PipelineMultisampleStateCreateInfo multisampling{};
+            multisampling.sampleShadingEnable = VK_FALSE;
+            multisampling.rasterizationSamples = vk::SampleCountFlagBits::e1;
+            multisampling.minSampleShading = 1.0f;
+            multisampling.pSampleMask = nullptr;
+            multisampling.alphaToCoverageEnable = VK_FALSE;
+            multisampling.alphaToOneEnable = VK_FALSE;
+            vk::PipelineColorBlendAttachmentState colorBlendAttachment{};
+            colorBlendAttachment.blendEnable = VK_FALSE;
+            colorBlendAttachment.colorWriteMask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG |
+                                                  vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA;
+            colorBlendAttachment.srcColorBlendFactor = vk::BlendFactor::eOne;
+            colorBlendAttachment.dstColorBlendFactor = vk::BlendFactor::eZero;
+            colorBlendAttachment.colorBlendOp = vk::BlendOp::eAdd;
+            colorBlendAttachment.srcAlphaBlendFactor = vk::BlendFactor::eOne;
+            colorBlendAttachment.dstAlphaBlendFactor = vk::BlendFactor::eZero;
+            colorBlendAttachment.alphaBlendOp = vk::BlendOp::eAdd;
+            vk::PipelineColorBlendStateCreateInfo colorBlending{};
+            colorBlending.logicOpEnable = VK_FALSE;
+            colorBlending.logicOp = vk::LogicOp::eCopy;
+            colorBlending.attachmentCount = 1;
+            colorBlending.pAttachments = &colorBlendAttachment;
+            colorBlending.blendConstants[0] = 0.0f;
+            colorBlending.blendConstants[1] = 0.0f;
+            colorBlending.blendConstants[2] = 0.0f;
+            colorBlending.blendConstants[3] = 0.0f;
+            vk::GraphicsPipelineCreateInfo pipelineInfo{};
+            pipelineInfo.stageCount = 2;
+            pipelineInfo.pStages = shaderStages;
+            pipelineInfo.pVertexInputState = &vertexInputInfo;
+            pipelineInfo.pInputAssemblyState = &inputAssembly;
+            pipelineInfo.pViewportState = &viewportState;
+            pipelineInfo.pRasterizationState = &rasterizer;
+            pipelineInfo.pMultisampleState = &multisampling;
+            pipelineInfo.pDepthStencilState = nullptr;
+            pipelineInfo.pColorBlendState = &colorBlending;
+            pipelineInfo.pDynamicState = nullptr;
+            pipelineInfo.layout = m_graphicsPipelineLayout;
+            pipelineInfo.renderPass = m_renderPass;
+            pipelineInfo.subpass = 0;
+            pipelineInfo.basePipelineHandle = nullptr;
+            pipelineInfo.basePipelineIndex = -1;
+            pipelineInfo.flags = vk::PipelineCreateFlags();
+            m_graphicsPipeline = m_device.createGraphicsPipeline(m_graphicsPipelineCache, pipelineInfo).value;
+            m_device.destroyShaderModule(vertShaderModule);
+            m_device.destroyShaderModule(fragShaderModule);
+        };
     public:
         NBodySimulator() {
             createInstance();
@@ -310,9 +465,16 @@ class NBodySimulator {
             createComputeDescriptorSetLayout();
             createComputePipelineLayout();
             createComputePipeline();
+            createRenderPass();
+            createGraphicsPipelineLayout();
+            createGraphicsPipeline();
         }
         ~NBodySimulator() {
             m_device.waitIdle();
+            m_device.destroyPipelineCache(m_graphicsPipelineCache);
+            m_device.destroyPipeline(m_graphicsPipeline);
+            m_device.destroyPipelineLayout(m_graphicsPipelineLayout);
+            m_device.destroyRenderPass(m_renderPass);
             m_device.destroyPipeline(m_computePipeline);
             m_device.destroyPipelineLayout(m_computePipelineLayout);
             m_device.destroyDescriptorSetLayout(m_computeDescriptorSetLayout);
