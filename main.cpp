@@ -249,7 +249,7 @@ class NBodySimulator {
                 m_stateSemaphores[i] = m_device.createSemaphore(stateSemaphoreCreateInfo);
             }
         };
-        void createComputDescriptorSetLayout(){
+        void createComputeDescriptorSetLayout(){
             vk::DescriptorSetLayoutBinding bindings[4];
             for(uint8_t i=0; i<4; i++){
                 bindings[i].binding = i;
@@ -307,7 +307,7 @@ class NBodySimulator {
                 createStagingBuffer();
             }
             createSyncObjects();
-            createComputDescriptorSetLayout();
+            createComputeDescriptorSetLayout();
             createComputePipelineLayout();
             createComputePipeline();
         }
