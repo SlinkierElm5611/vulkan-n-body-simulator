@@ -4,12 +4,16 @@
 #include <vk_mem_alloc.h>
 #define VULKAN_HPP_DISPATCH_LOADER_DYNAMIC 1
 #include <vulkan/vulkan.hpp>
+#define GLFW_INCLUDE_VULKAN
+#include <GLFW/glfw3.h>
 #include <vector>
 #include "comp.h"
 #include "vert.h"
 #include "frag.h"
 
 VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
+
+#define WINDOW_SIZE 800
 
 #define NUMBER_OF_STATES 2
 #define STATE_READY_FOR_COMPUTE 0
@@ -18,6 +22,7 @@ VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
 
 class NBodySimulator {
     private:
+        GLFWwindow* m_window;
         vk::Instance m_instance;
         vk::PhysicalDevice m_physicalDevice;
         vk::PhysicalDeviceType m_physicalDeviceType;
@@ -54,6 +59,17 @@ class NBodySimulator {
         vk::PipelineLayout m_graphicsPipelineLayout;
         vk::Pipeline m_graphicsPipeline;
         vk::PipelineCache m_graphicsPipelineCache;
+        void createWindow() {
+            if (!glfwInit()) {
+                throw std::runtime_error("Failed to initialize GLFW");
+            }
+            glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+            glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+            m_window = glfwCreateWindow(WINDOW_SIZE, WINDOW_SIZE, "NBodySimulator", nullptr, nullptr);
+            if (!m_window) {
+                throw std::runtime_error("Failed to create GLFW window");
+            }
+        }
         void createInstance() {
             VULKAN_HPP_DEFAULT_DISPATCHER.init();
             vk::ApplicationInfo appInfo{};
@@ -62,10 +78,10 @@ class NBodySimulator {
             appInfo.pEngineName = "NBodySimulator";
             appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
             appInfo.apiVersion = VK_API_VERSION_1_2;
-            std::vector<const char*> instanceExtensions = {
-                VK_KHR_SURFACE_EXTENSION_NAME,
-                VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME,
-            };
+            uint32_t glfwExtensionCount = 0;
+            const char** glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
+            std::vector<const char*> instanceExtensions(glfwExtensions, glfwExtensions + glfwExtensionCount);
+            instanceExtensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
             std::vector<const char*> instanceLayers = {
                 "VK_LAYER_KHRONOS_validation",
             };
@@ -378,11 +394,11 @@ class NBodySimulator {
             vk::Viewport viewport{};
             viewport.x = 0.0f;
             viewport.y = 0.0f;
-            viewport.width = 800.0f;
-            viewport.height = 600.0f;
+            viewport.width = WINDOW_SIZE;
+            viewport.height = WINDOW_SIZE;
             viewport.minDepth = 0.0f;
             viewport.maxDepth = 1.0f;
-            vk::Rect2D scissor{{0, 0}, {800, 600}};
+            vk::Rect2D scissor{{0, 0}, {WINDOW_SIZE, WINDOW_SIZE}};
             vk::PipelineViewportStateCreateInfo viewportState{};
             viewportState.viewportCount = 1;
             viewportState.pViewports = &viewport;
@@ -448,6 +464,7 @@ class NBodySimulator {
         };
     public:
         NBodySimulator() {
+            createWindow();
             createInstance();
             createPhysicalDevice();
             createDevice();
@@ -494,6 +511,8 @@ class NBodySimulator {
             vmaDestroyAllocator(m_allocator);
             m_device.destroy();
             m_instance.destroy();
+            glfwDestroyWindow(m_window);
+            glfwTerminate();
         }
 };
 
