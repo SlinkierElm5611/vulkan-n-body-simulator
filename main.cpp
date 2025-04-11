@@ -21,6 +21,9 @@ VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
 #define STATE_READY_FOR_RENDER 1
 #define STATE_READY_FOR_SOURCE_OF_NEXT_COMPUTE 2
 
+#define NUM_TRIANGLES 10
+#define NUM_PARTICLES 1000
+
 class NBodySimulator {
     private:
         GLFWwindow* m_window;
@@ -31,7 +34,7 @@ class NBodySimulator {
         vk::Queue m_queue;
         VmaAllocator m_allocator;
         vk::CommandPool m_commandPool;
-        vk::CommandBuffer m_commandBuffer;
+        std::vector<vk::CommandBuffer> m_commandBuffers;
         vk::Buffer m_vertexBuffer;
         VmaAllocation m_vertexBufferAllocation;
         void* m_mappedVertexBuffer;
@@ -60,6 +63,11 @@ class NBodySimulator {
         vk::PipelineLayout m_graphicsPipelineLayout;
         vk::Pipeline m_graphicsPipeline;
         vk::PipelineCache m_graphicsPipelineCache;
+        vk::SurfaceKHR m_surface;
+        vk::SwapchainKHR m_swapChain;
+        vk::Image m_swapChainImages[FRAMES_IN_FLIGHT];
+        vk::ImageView m_swapChainImageViews[FRAMES_IN_FLIGHT];
+        vk::Framebuffer m_swapChainFramebuffers[FRAMES_IN_FLIGHT];
         void createWindow() {
             if (!glfwInit()) {
                 throw std::runtime_error("Failed to initialize GLFW");
@@ -162,12 +170,14 @@ class NBodySimulator {
             vk::CommandBufferAllocateInfo allocateInfo{};
             allocateInfo.commandPool = m_commandPool;
             allocateInfo.level = vk::CommandBufferLevel::ePrimary;
-            allocateInfo.commandBufferCount = 1;
-            m_commandBuffer = m_device.allocateCommandBuffers(allocateInfo)[0];
+            allocateInfo.commandBufferCount = FRAMES_IN_FLIGHT;
+            for (const auto& newCommandBuffer : m_device.allocateCommandBuffers(allocateInfo)){
+                m_commandBuffers.push_back(newCommandBuffer);
+            }
         }
         void createVertexBuffer() {
             vk::BufferCreateInfo bufferInfo{};
-            bufferInfo.size = sizeof(float) * 2 * 11;
+            bufferInfo.size = sizeof(float) * 2 * (NUM_TRIANGLES + 1);
             bufferInfo.usage = vk::BufferUsageFlagBits::eVertexBuffer;
             VmaAllocationCreateInfo allocInfo{};
             allocInfo.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
@@ -185,7 +195,7 @@ class NBodySimulator {
         }
         void createIndexBuffer() {
             vk::BufferCreateInfo bufferInfo{};
-            bufferInfo.size = sizeof(uint32_t) * 3 * 10;
+            bufferInfo.size = sizeof(uint32_t) * 3 * NUM_TRIANGLES;
             bufferInfo.usage = vk::BufferUsageFlagBits::eIndexBuffer;
             VmaAllocationCreateInfo allocInfo{};
             allocInfo.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
@@ -203,7 +213,7 @@ class NBodySimulator {
         };
         void createBodyPositionBuffers(){
             vk::BufferCreateInfo bufferInfo{};
-            bufferInfo.size = sizeof(float) * 2 * 1000;
+            bufferInfo.size = sizeof(float) * 2 * NUM_PARTICLES;
             bufferInfo.usage = vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eVertexBuffer;
             VmaAllocationCreateInfo allocInfo{};
             allocInfo.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
@@ -223,7 +233,7 @@ class NBodySimulator {
         };
         void createBodyVelocityBuffers(){
             vk::BufferCreateInfo bufferInfo{};
-            bufferInfo.size = sizeof(float) * 2 * 1000;
+            bufferInfo.size = sizeof(float) * 2 * NUM_PARTICLES;
             bufferInfo.usage = vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eVertexBuffer;
             VmaAllocationCreateInfo allocInfo{};
             allocInfo.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
@@ -316,7 +326,7 @@ class NBodySimulator {
         };
         void createRenderPass(){
             vk::AttachmentDescription colourAttachment{};
-            colourAttachment.format = vk::Format::eR8G8B8A8Srgb;
+            colourAttachment.format = vk::Format::eB8G8R8A8Srgb;
             colourAttachment.samples = vk::SampleCountFlagBits::e1;
             colourAttachment.loadOp = vk::AttachmentLoadOp::eClear;
             colourAttachment.storeOp = vk::AttachmentStoreOp::eStore;
@@ -463,6 +473,64 @@ class NBodySimulator {
             m_device.destroyShaderModule(vertShaderModule);
             m_device.destroyShaderModule(fragShaderModule);
         };
+        void createSurface() {
+            if (glfwCreateWindowSurface(m_instance, m_window, nullptr, reinterpret_cast<VkSurfaceKHR*>(&m_surface)) != VK_SUCCESS) {
+                throw std::runtime_error("Failed to create window surface");
+            }
+        };
+        void createSwapchain(){
+            vk::SwapchainCreateInfoKHR createInfo{};
+            createInfo.surface = m_surface;
+            createInfo.minImageCount = FRAMES_IN_FLIGHT;
+            createInfo.imageFormat = vk::Format::eB8G8R8A8Srgb;
+            createInfo.imageColorSpace = vk::ColorSpaceKHR::eSrgbNonlinear;
+            createInfo.imageExtent.width = WINDOW_SIZE;
+            createInfo.imageExtent.height = WINDOW_SIZE;
+            createInfo.imageArrayLayers = 1;
+            createInfo.imageUsage = vk::ImageUsageFlagBits::eColorAttachment;
+            createInfo.preTransform = vk::SurfaceTransformFlagBitsKHR::eIdentity;
+            createInfo.compositeAlpha = vk::CompositeAlphaFlagBitsKHR::eOpaque;
+            createInfo.presentMode = vk::PresentModeKHR::eFifo;
+            createInfo.clipped = VK_TRUE;
+            m_swapChain = m_device.createSwapchainKHR(createInfo);
+        };
+        void getSwapchainImages(){
+            uint32_t counter = 0;
+            for (const auto& swapChainImage : m_device.getSwapchainImagesKHR(m_swapChain)){
+                m_swapChainImages[counter] = swapChainImage;
+                counter++;
+            }
+        };
+        void createSwapchainImageViews(){
+            vk::ImageViewCreateInfo createInfo{};
+            createInfo.viewType = vk::ImageViewType::e2D;
+            createInfo.format = vk::Format::eB8G8R8A8Srgb;
+            createInfo.components.r = vk::ComponentSwizzle::eIdentity;
+            createInfo.components.g = vk::ComponentSwizzle::eIdentity;
+            createInfo.components.b = vk::ComponentSwizzle::eIdentity;
+            createInfo.components.a = vk::ComponentSwizzle::eIdentity;
+            createInfo.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+            createInfo.subresourceRange.baseMipLevel = 0;
+            createInfo.subresourceRange.levelCount = 1;
+            createInfo.subresourceRange.baseArrayLayer = 0;
+            createInfo.subresourceRange.layerCount = 1;
+            for (int i = 0; i < FRAMES_IN_FLIGHT; ++i) {
+                createInfo.image = m_swapChainImages[i];
+                m_swapChainImageViews[i] = m_device.createImageView(createInfo);
+            }
+        };
+        void createSwapchainFramebuffers(){
+            vk::FramebufferCreateInfo framebufferInfo{};
+            framebufferInfo.renderPass = m_renderPass;
+            framebufferInfo.attachmentCount = 1;
+            framebufferInfo.pAttachments = &m_swapChainImageViews[0];
+            framebufferInfo.width = WINDOW_SIZE;
+            framebufferInfo.height = WINDOW_SIZE;
+            framebufferInfo.layers = 1;
+            for (int i = 0; i < FRAMES_IN_FLIGHT; ++i) {
+                m_swapChainFramebuffers[i] = m_device.createFramebuffer(framebufferInfo);
+            }
+        };
     public:
         NBodySimulator() {
             createWindow();
@@ -486,9 +554,20 @@ class NBodySimulator {
             createRenderPass();
             createGraphicsPipelineLayout();
             createGraphicsPipeline();
+            createSurface();
+            createSwapchain();
+            getSwapchainImages();
+            createSwapchainImageViews();
+            createSwapchainFramebuffers();
         }
         ~NBodySimulator() {
             m_device.waitIdle();
+            for (int i = 0; i < FRAMES_IN_FLIGHT; ++i) {
+                m_device.destroyImageView(m_swapChainImageViews[i]);
+                m_device.destroyFramebuffer(m_swapChainFramebuffers[i]);
+            }
+            m_device.destroySwapchainKHR(m_swapChain);
+            m_instance.destroySurfaceKHR(m_surface);
             m_device.destroyPipelineCache(m_graphicsPipelineCache);
             m_device.destroyPipeline(m_graphicsPipeline);
             m_device.destroyPipelineLayout(m_graphicsPipelineLayout);
