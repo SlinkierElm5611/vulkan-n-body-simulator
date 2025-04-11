@@ -15,7 +15,8 @@ VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
 
 #define WINDOW_SIZE 800
 
-#define NUMBER_OF_STATES 2
+#define NUMBER_OF_STATES 3
+#define FRAMES_IN_FLIGHT 2
 #define STATE_READY_FOR_COMPUTE 0
 #define STATE_READY_FOR_RENDER 1
 #define STATE_READY_FOR_SOURCE_OF_NEXT_COMPUTE 2
@@ -212,7 +213,7 @@ class NBodySimulator {
                 allocInfo.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT;
             }
             VmaAllocationInfo info{};
-            for (int i = 0; i < 2; ++i) {
+            for (int i = 0; i < NUMBER_OF_STATES; ++i) {
                 vmaCreateBuffer(m_allocator, reinterpret_cast<VkBufferCreateInfo*>(&bufferInfo),
                                 reinterpret_cast<VmaAllocationCreateInfo*>(&allocInfo),
                                 reinterpret_cast<VkBuffer*>(&m_bodyPositionBuffers[i]),
@@ -258,7 +259,7 @@ class NBodySimulator {
             vk::FenceCreateInfo fenceInfo{};
             fenceInfo.flags = vk::FenceCreateFlagBits::eSignaled;
             vk::SemaphoreCreateInfo semaphoreInfo{};
-            for (int i = 0; i < NUMBER_OF_STATES; ++i) {
+            for (int i = 0; i < FRAMES_IN_FLIGHT; ++i) {
                 m_imageAvailableSemaphores[i] = m_device.createSemaphore(semaphoreInfo);
                 m_inFlightFences[i] = m_device.createFence(fenceInfo);
             }
@@ -500,10 +501,12 @@ class NBodySimulator {
             }
             for (int i = 0; i < NUMBER_OF_STATES; ++i) {
                 m_device.destroySemaphore(m_stateSemaphores[i]);
-                m_device.destroySemaphore(m_imageAvailableSemaphores[i]);
-                m_device.destroyFence(m_inFlightFences[i]);
                 vmaDestroyBuffer(m_allocator, m_bodyPositionBuffers[i], m_bodyPositionBufferAllocations[i]);
                 vmaDestroyBuffer(m_allocator, m_bodyVelocityBuffers[i], m_bodyVelocityBufferAllocations[i]);
+            }
+            for (int i = 0; i < FRAMES_IN_FLIGHT; ++i) {
+                m_device.destroySemaphore(m_imageAvailableSemaphores[i]);
+                m_device.destroyFence(m_inFlightFences[i]);
             }
             vmaDestroyBuffer(m_allocator, m_indexBuffer, m_indexBufferAllocation);
             vmaDestroyBuffer(m_allocator, m_vertexBuffer, m_vertexBufferAllocation);
