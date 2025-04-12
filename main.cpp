@@ -8,6 +8,7 @@
 #include <GLFW/glfw3.h>
 #include <vector>
 #include <cmath>
+#include <chrono>
 #include "comp.h"
 #include "vert.h"
 #include "frag.h"
@@ -15,12 +16,6 @@
 VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
 
 #define WINDOW_SIZE 800
-
-#define NUMBER_OF_STATES 3
-#define FRAMES_IN_FLIGHT 2
-#define STATE_READY_FOR_COMPUTE 0
-#define STATE_READY_FOR_RENDER 1
-#define STATE_READY_FOR_SOURCE_OF_NEXT_COMPUTE 2
 
 #define NUM_TRIANGLES 10
 #define NUM_PARTICLES 1000
@@ -35,27 +30,30 @@ class NBodySimulator {
         vk::Queue m_queue;
         VmaAllocator m_allocator;
         vk::CommandPool m_commandPool;
-        std::vector<vk::CommandBuffer> m_commandBuffers;
+        std::vector<vk::CommandBuffer> m_graphicsCommandBuffers;
+        std::vector<vk::CommandBuffer> m_computeCommandBuffers;
         vk::Buffer m_vertexBuffer;
         VmaAllocation m_vertexBufferAllocation;
         void* m_mappedVertexBuffer;
         vk::Buffer m_indexBuffer;
         VmaAllocation m_indexBufferAllocation;
         void* m_mappedIndexBuffer;
-        vk::Buffer m_bodyPositionBuffers[NUMBER_OF_STATES];
-        VmaAllocation m_bodyPositionBufferAllocations[NUMBER_OF_STATES];
-        void* m_mappedBodyPositionBuffers[NUMBER_OF_STATES];
-        vk::Buffer m_bodyVelocityBuffers[NUMBER_OF_STATES];
-        VmaAllocation m_bodyVelocityBufferAllocations[NUMBER_OF_STATES];
-        void* m_mappedBodyVelocityBuffers[NUMBER_OF_STATES];
+        vk::Buffer m_bodyPositionBuffers[2];
+        VmaAllocation m_bodyPositionBufferAllocations[2];
+        void* m_mappedBodyPositionBuffers[2];
+        vk::Buffer m_bodyVelocityBuffers[2];
+        VmaAllocation m_bodyVelocityBufferAllocations[2];
+        void* m_mappedBodyVelocityBuffers[2];
+        std::chrono::time_point<std::chrono::high_resolution_clock> m_stateTimestamps[2];
         vk::Buffer m_stagingBuffer;
         VmaAllocation m_stagingBufferAllocation;
         void* m_mappedStagingBuffer;
         uint8_t m_currentState = 0;
         uint8_t m_nextState = 1;
-        vk::Semaphore m_stateSemaphores[NUMBER_OF_STATES];
-        vk::Semaphore m_imageAvailableSemaphores[NUMBER_OF_STATES];
-        vk::Fence m_inFlightFences[NUMBER_OF_STATES];
+        vk::Semaphore m_stateReadyForRenderSemaphores[2];
+        vk::Semaphore m_renderFinishedSemaphores[2];
+        vk::Semaphore m_imageAvailableSemaphores[2];
+        vk::Fence m_presentFence;
         vk::DescriptorSetLayout m_computeDescriptorSetLayout;
         vk::PipelineLayout m_computePipelineLayout;
         vk::Pipeline m_computePipeline;
@@ -66,9 +64,10 @@ class NBodySimulator {
         vk::PipelineCache m_graphicsPipelineCache;
         vk::SurfaceKHR m_surface;
         vk::SwapchainKHR m_swapChain;
-        vk::Image m_swapChainImages[FRAMES_IN_FLIGHT];
-        vk::ImageView m_swapChainImageViews[FRAMES_IN_FLIGHT];
-        vk::Framebuffer m_swapChainFramebuffers[FRAMES_IN_FLIGHT];
+        vk::Image m_swapChainImages[2];
+        vk::ImageView m_swapChainImageViews[2];
+        vk::Framebuffer m_swapChainFramebuffers[2];
+        bool m_isFirstCompute = true;
         void createWindow() {
             if (!glfwInit()) {
                 throw std::runtime_error("Failed to initialize GLFW");
@@ -171,9 +170,13 @@ class NBodySimulator {
             vk::CommandBufferAllocateInfo allocateInfo{};
             allocateInfo.commandPool = m_commandPool;
             allocateInfo.level = vk::CommandBufferLevel::ePrimary;
-            allocateInfo.commandBufferCount = FRAMES_IN_FLIGHT;
+            allocateInfo.commandBufferCount = 2;
             for (const auto& newCommandBuffer : m_device.allocateCommandBuffers(allocateInfo)){
-                m_commandBuffers.push_back(newCommandBuffer);
+                m_graphicsCommandBuffers.push_back(newCommandBuffer);
+            }
+            allocateInfo.commandBufferCount = 2;
+            for (const auto& newCommandBuffer : m_device.allocateCommandBuffers(allocateInfo)){
+                m_computeCommandBuffers.push_back(newCommandBuffer);
             }
         }
         void createVertexBuffer() {
@@ -224,7 +227,7 @@ class NBodySimulator {
                 allocInfo.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT;
             }
             VmaAllocationInfo info{};
-            for (int i = 0; i < NUMBER_OF_STATES; ++i) {
+            for (int i = 0; i < 2; ++i) {
                 vmaCreateBuffer(m_allocator, reinterpret_cast<VkBufferCreateInfo*>(&bufferInfo),
                                 reinterpret_cast<VmaAllocationCreateInfo*>(&allocInfo),
                                 reinterpret_cast<VkBuffer*>(&m_bodyPositionBuffers[i]),
@@ -244,7 +247,7 @@ class NBodySimulator {
                 allocInfo.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT;
             }
             VmaAllocationInfo info{};
-            for (int i = 0; i < NUMBER_OF_STATES; ++i) {
+            for (int i = 0; i < 2; ++i) {
                 vmaCreateBuffer(m_allocator, reinterpret_cast<VkBufferCreateInfo*>(&bufferInfo),
                                 reinterpret_cast<VmaAllocationCreateInfo*>(&allocInfo),
                                 reinterpret_cast<VkBuffer*>(&m_bodyVelocityBuffers[i]),
@@ -270,18 +273,14 @@ class NBodySimulator {
             vk::FenceCreateInfo fenceInfo{};
             fenceInfo.flags = vk::FenceCreateFlagBits::eSignaled;
             vk::SemaphoreCreateInfo semaphoreInfo{};
-            for (int i = 0; i < FRAMES_IN_FLIGHT; ++i) {
+            for (int i = 0; i < 2; ++i) {
+                m_renderFinishedSemaphores[i] = m_device.createSemaphore(semaphoreInfo);
                 m_imageAvailableSemaphores[i] = m_device.createSemaphore(semaphoreInfo);
-                m_inFlightFences[i] = m_device.createFence(fenceInfo);
             }
-            vk::SemaphoreCreateInfo stateSemaphoreCreateInfo{};
-            vk::SemaphoreTypeCreateInfo stateSemaphoreTypeCreateInfo{};
-            stateSemaphoreTypeCreateInfo.semaphoreType = vk::SemaphoreType::eTimeline;
-            stateSemaphoreTypeCreateInfo.initialValue = STATE_READY_FOR_COMPUTE;
-            stateSemaphoreCreateInfo.pNext = &stateSemaphoreTypeCreateInfo;
-            for (int i = 0; i < NUMBER_OF_STATES; ++i) {
-                m_stateSemaphores[i] = m_device.createSemaphore(stateSemaphoreCreateInfo);
+            for (int i = 0; i < 2; ++i) {
+                m_stateReadyForRenderSemaphores[i] = m_device.createSemaphore(semaphoreInfo);
             }
+            m_presentFence = m_device.createFence(fenceInfo);
         };
         void createComputeDescriptorSetLayout(){
             vk::DescriptorSetLayoutBinding bindings[4];
@@ -482,7 +481,7 @@ class NBodySimulator {
         void createSwapchain(){
             vk::SwapchainCreateInfoKHR createInfo{};
             createInfo.surface = m_surface;
-            createInfo.minImageCount = FRAMES_IN_FLIGHT;
+            createInfo.minImageCount = 2;
             createInfo.imageFormat = vk::Format::eB8G8R8A8Srgb;
             createInfo.imageColorSpace = vk::ColorSpaceKHR::eSrgbNonlinear;
             createInfo.imageExtent.width = WINDOW_SIZE;
@@ -515,7 +514,7 @@ class NBodySimulator {
             createInfo.subresourceRange.levelCount = 1;
             createInfo.subresourceRange.baseArrayLayer = 0;
             createInfo.subresourceRange.layerCount = 1;
-            for (int i = 0; i < FRAMES_IN_FLIGHT; ++i) {
+            for (int i = 0; i < 2; ++i) {
                 createInfo.image = m_swapChainImages[i];
                 m_swapChainImageViews[i] = m_device.createImageView(createInfo);
             }
@@ -528,7 +527,7 @@ class NBodySimulator {
             framebufferInfo.width = WINDOW_SIZE;
             framebufferInfo.height = WINDOW_SIZE;
             framebufferInfo.layers = 1;
-            for (int i = 0; i < FRAMES_IN_FLIGHT; ++i) {
+            for (int i = 0; i < 2; ++i) {
                 m_swapChainFramebuffers[i] = m_device.createFramebuffer(framebufferInfo);
             }
         };
@@ -539,16 +538,16 @@ class NBodySimulator {
                 memcpy(m_mappedStagingBuffer, data, size);
                 vk::CommandBufferBeginInfo beginInfo{};
                 beginInfo.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit;
-                m_commandBuffers[m_currentState].begin(beginInfo);
+                m_computeCommandBuffers[m_currentState].begin(beginInfo);
                 vk::BufferCopy copyRegion{};
                 copyRegion.size = size;
                 copyRegion.srcOffset = 0;
                 copyRegion.dstOffset = 0;
-                m_commandBuffers[m_currentState].copyBuffer(m_stagingBuffer, dstBuffer, copyRegion);
-                m_commandBuffers[m_currentState].end();
+                m_computeCommandBuffers[m_currentState].copyBuffer(m_stagingBuffer, dstBuffer, copyRegion);
+                m_computeCommandBuffers[m_currentState].end();
                 vk::SubmitInfo submitInfo{};
                 submitInfo.commandBufferCount = 1;
-                submitInfo.pCommandBuffers = &m_commandBuffers[m_currentState];
+                submitInfo.pCommandBuffers = &m_computeCommandBuffers[m_currentState];
                 m_queue.submit(submitInfo, nullptr);
                 m_queue.waitIdle();
             } else {
@@ -574,6 +573,23 @@ class NBodySimulator {
                 indices[i * 3 + 2] = NUM_TRIANGLES;
             }
             copyBufferToGPU(indices, NUM_TRIANGLES * 3, m_indexBuffer, m_mappedIndexBuffer);
+        };
+        void generateBodies(){
+            float positions[NUM_PARTICLES * 2];
+            float velocities[NUM_PARTICLES * 2];
+            for (int i = 0; i < NUM_PARTICLES; ++i) {
+                float randomPosXValue = 1.0 - (2.0 * static_cast<float>(rand()) / RAND_MAX);
+                float randomPosYValue = 1.0 - (2.0 * static_cast<float>(rand()) / RAND_MAX);
+                float randomVolXValue = 0.5 - static_cast<float>(rand()) / RAND_MAX;
+                float randomVolYValue = 0.5 - static_cast<float>(rand()) / RAND_MAX;
+                positions[i * 2] = randomPosXValue;
+                positions[i * 2 + 1] = randomPosYValue;
+                velocities[i * 2] = randomVolXValue;
+                velocities[i * 2 + 1] = randomVolYValue;
+            }
+            copyBufferToGPU(positions, NUM_PARTICLES * 2, m_bodyPositionBuffers[m_currentState], m_mappedBodyPositionBuffers[m_currentState]);
+            copyBufferToGPU(velocities, NUM_PARTICLES * 2, m_bodyVelocityBuffers[m_currentState], m_mappedBodyVelocityBuffers[m_currentState]);
+            m_stateTimestamps[m_currentState] = std::chrono::high_resolution_clock::now();
         };
     public:
         NBodySimulator() {
@@ -605,10 +621,11 @@ class NBodySimulator {
             createSwapchainFramebuffers();
             generateVertices();
             generateIndices();
+            generateBodies();
         }
         ~NBodySimulator() {
             m_device.waitIdle();
-            for (int i = 0; i < FRAMES_IN_FLIGHT; ++i) {
+            for (int i = 0; i < 2; ++i) {
                 m_device.destroyImageView(m_swapChainImageViews[i]);
                 m_device.destroyFramebuffer(m_swapChainFramebuffers[i]);
             }
@@ -624,15 +641,14 @@ class NBodySimulator {
             if (m_physicalDeviceType == vk::PhysicalDeviceType::eDiscreteGpu) {
                 vmaDestroyBuffer(m_allocator, m_stagingBuffer, m_stagingBufferAllocation);
             }
-            for (int i = 0; i < NUMBER_OF_STATES; ++i) {
-                m_device.destroySemaphore(m_stateSemaphores[i]);
+            for (int i = 0; i < 2; ++i) {
+                m_device.destroySemaphore(m_stateReadyForRenderSemaphores[i]);
                 vmaDestroyBuffer(m_allocator, m_bodyPositionBuffers[i], m_bodyPositionBufferAllocations[i]);
                 vmaDestroyBuffer(m_allocator, m_bodyVelocityBuffers[i], m_bodyVelocityBufferAllocations[i]);
-            }
-            for (int i = 0; i < FRAMES_IN_FLIGHT; ++i) {
+                m_device.destroySemaphore(m_renderFinishedSemaphores[i]);
                 m_device.destroySemaphore(m_imageAvailableSemaphores[i]);
-                m_device.destroyFence(m_inFlightFences[i]);
             }
+            m_device.destroyFence(m_presentFence);
             vmaDestroyBuffer(m_allocator, m_indexBuffer, m_indexBufferAllocation);
             vmaDestroyBuffer(m_allocator, m_vertexBuffer, m_vertexBufferAllocation);
             m_device.destroyCommandPool(m_commandPool);
