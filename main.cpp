@@ -7,6 +7,7 @@
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 #include <vector>
+#include <cmath>
 #include "comp.h"
 #include "vert.h"
 #include "frag.h"
@@ -253,7 +254,7 @@ class NBodySimulator {
         };
         void createStagingBuffer() {
             vk::BufferCreateInfo bufferInfo{};
-            bufferInfo.size = sizeof(float) * 2 * 1000;
+            bufferInfo.size = std::max(sizeof(float) * 2 * NUM_PARTICLES, sizeof(uint32_t) * 3 * NUM_TRIANGLES);
             bufferInfo.usage = vk::BufferUsageFlagBits::eTransferSrc;
             VmaAllocationCreateInfo allocInfo{};
             allocInfo.usage = VMA_MEMORY_USAGE_AUTO_PREFER_HOST;
@@ -531,6 +532,49 @@ class NBodySimulator {
                 m_swapChainFramebuffers[i] = m_device.createFramebuffer(framebufferInfo);
             }
         };
+        template<typename T>
+        void copyBufferToGPU(T* data, size_t cout, vk::Buffer dstBuffer, void* mappedBufferPtr){
+            uint32_t size = sizeof(T) * cout;
+            if (m_physicalDeviceType == vk::PhysicalDeviceType::eDiscreteGpu) {
+                memcpy(m_mappedStagingBuffer, data, size);
+                vk::CommandBufferBeginInfo beginInfo{};
+                beginInfo.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit;
+                m_commandBuffers[m_currentState].begin(beginInfo);
+                vk::BufferCopy copyRegion{};
+                copyRegion.size = size;
+                copyRegion.srcOffset = 0;
+                copyRegion.dstOffset = 0;
+                m_commandBuffers[m_currentState].copyBuffer(m_stagingBuffer, dstBuffer, copyRegion);
+                m_commandBuffers[m_currentState].end();
+                vk::SubmitInfo submitInfo{};
+                submitInfo.commandBufferCount = 1;
+                submitInfo.pCommandBuffers = &m_commandBuffers[m_currentState];
+                m_queue.submit(submitInfo, nullptr);
+                m_queue.waitIdle();
+            } else {
+                memcpy(mappedBufferPtr, data, size);
+            }
+        };
+        void generateVertices(){
+            float vertices[(NUM_TRIANGLES + 1) * 2];
+            for (int i = 0; i < NUM_TRIANGLES; ++i) {
+                float angle = i * 2.0f * M_PI / NUM_TRIANGLES;
+                vertices[i * 2] = cos(angle);
+                vertices[i * 2 + 1] = sin(angle);
+            }
+            vertices[NUM_TRIANGLES * 2] = 0.0f;
+            vertices[NUM_TRIANGLES * 2 + 1] = 0.0f;
+            copyBufferToGPU(vertices, (NUM_TRIANGLES + 1) * 2, m_vertexBuffer, m_mappedVertexBuffer);
+        };
+        void generateIndices(){
+            uint32_t indices[NUM_TRIANGLES * 3];
+            for (int i = 0; i < NUM_TRIANGLES; ++i) {
+                indices[i * 3] = i;
+                indices[i * 3 + 1] = (i + 1) % NUM_TRIANGLES;
+                indices[i * 3 + 2] = NUM_TRIANGLES;
+            }
+            copyBufferToGPU(indices, NUM_TRIANGLES * 3, m_indexBuffer, m_mappedIndexBuffer);
+        };
     public:
         NBodySimulator() {
             createWindow();
@@ -559,6 +603,8 @@ class NBodySimulator {
             getSwapchainImages();
             createSwapchainImageViews();
             createSwapchainFramebuffers();
+            generateVertices();
+            generateIndices();
         }
         ~NBodySimulator() {
             m_device.waitIdle();
