@@ -587,7 +587,6 @@ class NBodySimulator {
             m_lastTime = std::chrono::high_resolution_clock::now();
         };
         void renderAndPresentCurrentState(){
-            //Add push descritor code
             m_device.waitForFences(m_presentFence, VK_TRUE, UINT64_MAX);
             m_device.resetFences(m_presentFence);
             uint32_t imageIndex = m_device.acquireNextImageKHR(m_swapChain, UINT64_MAX, m_imageAvailableSemaphore, nullptr).value;
@@ -630,7 +629,7 @@ class NBodySimulator {
             submitInfo.pWaitDstStageMask = waitStages;
             submitInfo.commandBufferCount = 1;
             submitInfo.pCommandBuffers = &m_graphicsCommandBuffer;
-            m_queue.submit(submitInfo);
+            m_queue.submit(submitInfo, m_presentFence);
             vk::PresentInfoKHR presentInfo{};
             presentInfo.waitSemaphoreCount = 1;
             presentInfo.pWaitSemaphores = &m_renderFinishedSemaphore;
@@ -706,6 +705,13 @@ class NBodySimulator {
             generateIndices();
             generateBodies();
         }
+        void run() {
+            while (!glfwWindowShouldClose(m_window)) {
+                glfwPollEvents();
+                //renderAndPresentCurrentState();
+                //computeNextState();
+            }
+        }
         ~NBodySimulator() {
             m_device.waitIdle();
             for (int i = 0; i < m_swapChainImageViews.size(); ++i) {
@@ -748,5 +754,6 @@ class NBodySimulator {
 
 int main() {
     NBodySimulator nBodySimulator;
+    nBodySimulator.run();
     return 0;
 }
