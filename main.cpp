@@ -44,7 +44,7 @@ class NBodySimulator {
         vk::Buffer m_bodyVelocityBuffers[2];
         VmaAllocation m_bodyVelocityBufferAllocations[2];
         void* m_mappedBodyVelocityBuffers[2];
-        std::chrono::time_point<std::chrono::high_resolution_clock> m_stateTimestamps[2];
+        std::chrono::time_point<std::chrono::high_resolution_clock> m_lastTime;
         vk::Buffer m_stagingBuffer;
         VmaAllocation m_stagingBufferAllocation;
         void* m_mappedStagingBuffer;
@@ -584,7 +584,7 @@ class NBodySimulator {
             }
             copyBufferToGPU(positions, NUM_PARTICLES * 2, m_bodyPositionBuffers[m_currentState], m_mappedBodyPositionBuffers[m_currentState]);
             copyBufferToGPU(velocities, NUM_PARTICLES * 2, m_bodyVelocityBuffers[m_currentState], m_mappedBodyVelocityBuffers[m_currentState]);
-            m_stateTimestamps[m_currentState] = std::chrono::high_resolution_clock::now();
+            m_lastTime = std::chrono::high_resolution_clock::now();
         };
         void renderAndPresentCurrentState(){
             //Add push descritor code
@@ -642,8 +642,8 @@ class NBodySimulator {
         };
         float updateTime(){
             auto currentTime = std::chrono::high_resolution_clock::now();
-            auto elapsedTime = std::chrono::duration_cast<std::chrono::milliseconds>(currentTime - m_stateTimestamps[m_currentState]).count();
-            m_stateTimestamps[m_currentState] = currentTime;
+            auto elapsedTime = std::chrono::duration_cast<std::chrono::milliseconds>(currentTime - m_lastTime).count();
+            m_lastTime = currentTime;
             return elapsedTime / 1000.0f;
         };
         void computeNextState(){
