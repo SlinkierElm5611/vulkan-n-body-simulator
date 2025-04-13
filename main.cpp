@@ -64,9 +64,9 @@ class NBodySimulator {
         vk::PipelineCache m_graphicsPipelineCache;
         vk::SurfaceKHR m_surface;
         vk::SwapchainKHR m_swapChain;
-        vk::Image m_swapChainImages[2];
-        vk::ImageView m_swapChainImageViews[2];
-        vk::Framebuffer m_swapChainFramebuffers[2];
+        std::vector<vk::Image> m_swapChainImages;
+        std::vector<vk::ImageView> m_swapChainImageViews;
+        std::vector<vk::Framebuffer> m_swapChainFramebuffers;
         bool m_isFirstCompute = true;
         void createWindow() {
             if (!glfwInit()) {
@@ -495,10 +495,8 @@ class NBodySimulator {
             m_swapChain = m_device.createSwapchainKHR(createInfo);
         };
         void getSwapchainImages(){
-            uint32_t counter = 0;
             for (const auto& swapChainImage : m_device.getSwapchainImagesKHR(m_swapChain)){
-                m_swapChainImages[counter] = swapChainImage;
-                counter++;
+                m_swapChainImages.push_back(swapChainImage);
             }
         };
         void createSwapchainImageViews(){
@@ -514,21 +512,21 @@ class NBodySimulator {
             createInfo.subresourceRange.levelCount = 1;
             createInfo.subresourceRange.baseArrayLayer = 0;
             createInfo.subresourceRange.layerCount = 1;
-            for (int i = 0; i < 2; ++i) {
+            for (int i = 0; i < m_swapChainImages.size(); ++i) {
                 createInfo.image = m_swapChainImages[i];
-                m_swapChainImageViews[i] = m_device.createImageView(createInfo);
+                m_swapChainImageViews.push_back(m_device.createImageView(createInfo));
             }
         };
         void createSwapchainFramebuffers(){
             vk::FramebufferCreateInfo framebufferInfo{};
             framebufferInfo.renderPass = m_renderPass;
             framebufferInfo.attachmentCount = 1;
-            framebufferInfo.pAttachments = &m_swapChainImageViews[0];
             framebufferInfo.width = WINDOW_SIZE;
             framebufferInfo.height = WINDOW_SIZE;
             framebufferInfo.layers = 1;
-            for (int i = 0; i < 2; ++i) {
-                m_swapChainFramebuffers[i] = m_device.createFramebuffer(framebufferInfo);
+            for (int i = 0; i < m_swapChainImageViews.size(); ++i) {
+                framebufferInfo.pAttachments = &m_swapChainImageViews[i];
+                m_swapChainFramebuffers.push_back(m_device.createFramebuffer(framebufferInfo));
             }
         };
         template<typename T>
@@ -625,7 +623,7 @@ class NBodySimulator {
         }
         ~NBodySimulator() {
             m_device.waitIdle();
-            for (int i = 0; i < 2; ++i) {
+            for (int i = 0; i < m_swapChainImageViews.size(); ++i) {
                 m_device.destroyImageView(m_swapChainImageViews[i]);
                 m_device.destroyFramebuffer(m_swapChainFramebuffers[i]);
             }
