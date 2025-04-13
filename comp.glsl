@@ -23,7 +23,7 @@ layout(push_constant) uniform PushConstant {
     uint particleCount;
 } pushConstant;
 
-#define ATTRACTION_CONSTANT 0.001
+#define ATTRACTION_CONSTANT 0.00001
 
 vec2 computeAttractorForce(vec2 position, vec2 position2) {
     vec2 diff = position - position2;

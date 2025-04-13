@@ -677,8 +677,6 @@ class NBodySimulator {
             descriptorWrites[2].pBufferInfo = &nextPositionBufferInfo;
             descriptorWrites[3].pBufferInfo = &nextVelocityBufferInfo;
             m_device.waitForFences(m_computeFence, VK_TRUE, UINT64_MAX);
-            std::cout<<"PosX : "<<reinterpret_cast<float*>(m_mappedBodyPositionBuffers[m_currentState])[0]<<" PosY : "<<reinterpret_cast<float*>(m_mappedBodyPositionBuffers[m_currentState])[1]<<std::endl;
-            std::cout<<"VelX : "<<reinterpret_cast<float*>(m_mappedBodyVelocityBuffers[m_currentState])[0]<<" VelY : "<<reinterpret_cast<float*>(m_mappedBodyVelocityBuffers[m_currentState])[1]<<std::endl;
             m_device.resetFences(m_computeFence);
             vk::CommandBufferBeginInfo beginInfo{};
             beginInfo.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit;
@@ -686,7 +684,7 @@ class NBodySimulator {
             m_computeCommandBuffer.bindPipeline(vk::PipelineBindPoint::eCompute, m_computePipeline);
             m_computeCommandBuffer.pushConstants(m_computePipelineLayout, vk::ShaderStageFlagBits::eCompute, 0, sizeof(pushConstants), pushConstants);
             m_computeCommandBuffer.pushDescriptorSetKHR(vk::PipelineBindPoint::eCompute, m_computePipelineLayout, 0, 4, descriptorWrites);
-            m_computeCommandBuffer.dispatch(NUM_PARTICLES / 64, 1, 1);
+            m_computeCommandBuffer.dispatch((NUM_PARTICLES / 64) + 1, 1, 1);
             m_computeCommandBuffer.end();
             vk::SubmitInfo submitInfo{};
             vk::Semaphore waitSemaphores[] = {m_stateReadyForComputeSemaphore};
