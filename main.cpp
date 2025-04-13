@@ -30,8 +30,8 @@ class NBodySimulator {
         vk::Queue m_queue;
         VmaAllocator m_allocator;
         vk::CommandPool m_commandPool;
-        std::vector<vk::CommandBuffer> m_graphicsCommandBuffers;
-        std::vector<vk::CommandBuffer> m_computeCommandBuffers;
+        vk::CommandBuffer m_graphicsCommandBuffer;
+        vk::CommandBuffer m_computeCommandBuffer;
         vk::Buffer m_vertexBuffer;
         VmaAllocation m_vertexBufferAllocation;
         void* m_mappedVertexBuffer;
@@ -50,10 +50,13 @@ class NBodySimulator {
         void* m_mappedStagingBuffer;
         uint8_t m_currentState = 0;
         uint8_t m_nextState = 1;
-        vk::Semaphore m_stateReadyForRenderSemaphores[2];
-        vk::Semaphore m_renderFinishedSemaphores[2];
-        vk::Semaphore m_imageAvailableSemaphores[2];
+        vk::Semaphore m_stateReadyForComputeSemaphore;
+        vk::Semaphore m_stateReadyForRenderSemaphore;
+        vk::Semaphore m_renderFinishedSemaphore;
+        vk::Semaphore m_presentFinishedSemaphore;
+        vk::Semaphore m_imageAvailableSemaphore;
         vk::Fence m_presentFence;
+        vk::Fence m_computeFence;
         vk::DescriptorSetLayout m_computeDescriptorSetLayout;
         vk::PipelineLayout m_computePipelineLayout;
         vk::Pipeline m_computePipeline;
@@ -67,7 +70,8 @@ class NBodySimulator {
         std::vector<vk::Image> m_swapChainImages;
         std::vector<vk::ImageView> m_swapChainImageViews;
         std::vector<vk::Framebuffer> m_swapChainFramebuffers;
-        bool m_isFirstCompute = true;
+        bool m_isFirstDraw = true;
+        uint32_t pushConstants[2] = {0, NUM_PARTICLES};
         void createWindow() {
             if (!glfwInit()) {
                 throw std::runtime_error("Failed to initialize GLFW");
@@ -171,13 +175,9 @@ class NBodySimulator {
             allocateInfo.commandPool = m_commandPool;
             allocateInfo.level = vk::CommandBufferLevel::ePrimary;
             allocateInfo.commandBufferCount = 2;
-            for (const auto& newCommandBuffer : m_device.allocateCommandBuffers(allocateInfo)){
-                m_graphicsCommandBuffers.push_back(newCommandBuffer);
-            }
-            allocateInfo.commandBufferCount = 2;
-            for (const auto& newCommandBuffer : m_device.allocateCommandBuffers(allocateInfo)){
-                m_computeCommandBuffers.push_back(newCommandBuffer);
-            }
+            std::vector<vk::CommandBuffer> commandBuffers = m_device.allocateCommandBuffers(allocateInfo);
+            m_graphicsCommandBuffer = commandBuffers[0];
+            m_computeCommandBuffer = commandBuffers[1];
         }
         void createVertexBuffer() {
             vk::BufferCreateInfo bufferInfo{};
@@ -273,14 +273,12 @@ class NBodySimulator {
             vk::FenceCreateInfo fenceInfo{};
             fenceInfo.flags = vk::FenceCreateFlagBits::eSignaled;
             vk::SemaphoreCreateInfo semaphoreInfo{};
-            for (int i = 0; i < 2; ++i) {
-                m_renderFinishedSemaphores[i] = m_device.createSemaphore(semaphoreInfo);
-                m_imageAvailableSemaphores[i] = m_device.createSemaphore(semaphoreInfo);
-            }
-            for (int i = 0; i < 2; ++i) {
-                m_stateReadyForRenderSemaphores[i] = m_device.createSemaphore(semaphoreInfo);
-            }
+            m_renderFinishedSemaphore = m_device.createSemaphore(semaphoreInfo);
+            m_imageAvailableSemaphore = m_device.createSemaphore(semaphoreInfo);
+            m_stateReadyForRenderSemaphore = m_device.createSemaphore(semaphoreInfo);
+            m_stateReadyForComputeSemaphore = m_device.createSemaphore(semaphoreInfo);
             m_presentFence = m_device.createFence(fenceInfo);
+            m_computeFence = m_device.createFence(fenceInfo);
         };
         void createComputeDescriptorSetLayout(){
             vk::DescriptorSetLayoutBinding bindings[4];
@@ -536,16 +534,16 @@ class NBodySimulator {
                 memcpy(m_mappedStagingBuffer, data, size);
                 vk::CommandBufferBeginInfo beginInfo{};
                 beginInfo.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit;
-                m_computeCommandBuffers[m_currentState].begin(beginInfo);
+                m_computeCommandBuffer.begin(beginInfo);
                 vk::BufferCopy copyRegion{};
                 copyRegion.size = size;
                 copyRegion.srcOffset = 0;
                 copyRegion.dstOffset = 0;
-                m_computeCommandBuffers[m_currentState].copyBuffer(m_stagingBuffer, dstBuffer, copyRegion);
-                m_computeCommandBuffers[m_currentState].end();
+                m_computeCommandBuffer.copyBuffer(m_stagingBuffer, dstBuffer, copyRegion);
+                m_computeCommandBuffer.end();
                 vk::SubmitInfo submitInfo{};
                 submitInfo.commandBufferCount = 1;
-                submitInfo.pCommandBuffers = &m_computeCommandBuffers[m_currentState];
+                submitInfo.pCommandBuffers = &m_computeCommandBuffer;
                 m_queue.submit(submitInfo, nullptr);
                 m_queue.waitIdle();
             } else {
@@ -588,6 +586,93 @@ class NBodySimulator {
             copyBufferToGPU(positions, NUM_PARTICLES * 2, m_bodyPositionBuffers[m_currentState], m_mappedBodyPositionBuffers[m_currentState]);
             copyBufferToGPU(velocities, NUM_PARTICLES * 2, m_bodyVelocityBuffers[m_currentState], m_mappedBodyVelocityBuffers[m_currentState]);
             m_stateTimestamps[m_currentState] = std::chrono::high_resolution_clock::now();
+        };
+        void renderAndPresentCurrentState(){
+            //Add push descritor code
+            m_device.waitForFences(m_presentFence, VK_TRUE, UINT64_MAX);
+            m_device.resetFences(m_presentFence);
+            uint32_t imageIndex = m_device.acquireNextImageKHR(m_swapChain, UINT64_MAX, m_imageAvailableSemaphore, nullptr).value;
+            vk::CommandBufferBeginInfo beginInfo{};
+            beginInfo.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit;
+            m_graphicsCommandBuffer.begin(beginInfo);
+            vk::RenderPassBeginInfo renderPassInfo{};
+            renderPassInfo.renderPass = m_renderPass;
+            renderPassInfo.framebuffer = m_swapChainFramebuffers[imageIndex];
+            renderPassInfo.renderArea.setExtent({WINDOW_SIZE, WINDOW_SIZE});
+            renderPassInfo.renderArea.setOffset({0, 0});
+            vk::ClearValue clearColor{};
+            clearColor.color.float32[0] = 0.0f;
+            clearColor.color.float32[1] = 0.0f;
+            clearColor.color.float32[2] = 0.0f;
+            clearColor.color.float32[3] = 1.0f;
+            renderPassInfo.clearValueCount = 1;
+            renderPassInfo.pClearValues = &clearColor;
+            m_graphicsCommandBuffer.beginRenderPass(renderPassInfo, vk::SubpassContents::eInline);
+            m_graphicsCommandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_graphicsPipeline);
+            m_graphicsCommandBuffer.bindVertexBuffers(0, {m_vertexBuffer, m_bodyPositionBuffers[m_currentState]}, {0, 0});
+            m_graphicsCommandBuffer.bindIndexBuffer(m_indexBuffer, 0, vk::IndexType::eUint32);
+            m_graphicsCommandBuffer.drawIndexed(NUM_TRIANGLES * 3, NUM_PARTICLES, 0, 0, 0);
+            m_graphicsCommandBuffer.endRenderPass();
+            m_graphicsCommandBuffer.end();
+            vk::PipelineStageFlags waitStages[] = {vk::PipelineStageFlagBits::eColorAttachmentOutput};
+            vk::SubmitInfo submitInfo{};
+            vk::Semaphore waitSemaphores[] = {m_imageAvailableSemaphore, m_stateReadyForRenderSemaphore};
+            if (m_isFirstDraw){
+                submitInfo.waitSemaphoreCount = 1;
+                submitInfo.pWaitSemaphores = &m_imageAvailableSemaphore;
+                m_isFirstDraw = false;
+            } else {
+                submitInfo.waitSemaphoreCount = 2;
+                submitInfo.pWaitSemaphores = waitSemaphores;
+            }
+            vk::Semaphore signalSemaphores[] = {m_stateReadyForComputeSemaphore, m_renderFinishedSemaphore};
+            submitInfo.signalSemaphoreCount = 2;
+            submitInfo.pSignalSemaphores = signalSemaphores;
+            submitInfo.pWaitDstStageMask = waitStages;
+            submitInfo.commandBufferCount = 1;
+            submitInfo.pCommandBuffers = &m_graphicsCommandBuffer;
+            m_queue.submit(submitInfo);
+            vk::PresentInfoKHR presentInfo{};
+            presentInfo.waitSemaphoreCount = 1;
+            presentInfo.pWaitSemaphores = &m_renderFinishedSemaphore;
+            presentInfo.swapchainCount = 1;
+            presentInfo.pSwapchains = &m_swapChain;
+            presentInfo.pImageIndices = &imageIndex;
+            presentInfo.pResults = nullptr;
+            m_queue.presentKHR(presentInfo);
+        };
+        float updateTime(){
+            auto currentTime = std::chrono::high_resolution_clock::now();
+            auto elapsedTime = std::chrono::duration_cast<std::chrono::milliseconds>(currentTime - m_stateTimestamps[m_currentState]).count();
+            m_stateTimestamps[m_currentState] = currentTime;
+            return elapsedTime / 1000.0f;
+        };
+        void computeNextState(){
+            float deltaTime = updateTime();
+            memcpy(pushConstants, &deltaTime, sizeof(float));
+            // Add push descriptor code
+            m_device.waitForFences(m_computeFence, VK_TRUE, UINT64_MAX);
+            m_device.resetFences(m_computeFence);
+            vk::CommandBufferBeginInfo beginInfo{};
+            beginInfo.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit;
+            m_computeCommandBuffer.begin(beginInfo);
+            m_computeCommandBuffer.bindPipeline(vk::PipelineBindPoint::eCompute, m_computePipeline);
+            m_computeCommandBuffer.pushConstants(m_computePipelineLayout, vk::ShaderStageFlagBits::eCompute, 0, sizeof(pushConstants), pushConstants);
+
+            m_computeCommandBuffer.dispatch(NUM_PARTICLES / 64, 1, 1);
+            m_computeCommandBuffer.end();
+            vk::SubmitInfo submitInfo{};
+            vk::Semaphore waitSemaphores[] = {m_stateReadyForComputeSemaphore};
+            submitInfo.waitSemaphoreCount = 1;
+            submitInfo.pWaitSemaphores = waitSemaphores;
+            vk::PipelineStageFlags waitStages[] = {vk::PipelineStageFlagBits::eComputeShader};
+            submitInfo.pWaitDstStageMask = waitStages;
+            vk::Semaphore signalSemaphores[] = {m_stateReadyForRenderSemaphore};
+            submitInfo.signalSemaphoreCount = 1;
+            submitInfo.pSignalSemaphores = signalSemaphores;
+            submitInfo.commandBufferCount = 1;
+            submitInfo.pCommandBuffers = &m_computeCommandBuffer;
+            m_queue.submit(submitInfo, m_computeFence);
         };
     public:
         NBodySimulator() {
@@ -640,13 +725,16 @@ class NBodySimulator {
                 vmaDestroyBuffer(m_allocator, m_stagingBuffer, m_stagingBufferAllocation);
             }
             for (int i = 0; i < 2; ++i) {
-                m_device.destroySemaphore(m_stateReadyForRenderSemaphores[i]);
                 vmaDestroyBuffer(m_allocator, m_bodyPositionBuffers[i], m_bodyPositionBufferAllocations[i]);
                 vmaDestroyBuffer(m_allocator, m_bodyVelocityBuffers[i], m_bodyVelocityBufferAllocations[i]);
-                m_device.destroySemaphore(m_renderFinishedSemaphores[i]);
-                m_device.destroySemaphore(m_imageAvailableSemaphores[i]);
             }
+            m_device.destroySemaphore(m_stateReadyForComputeSemaphore);
+            m_device.destroySemaphore(m_stateReadyForRenderSemaphore);
+            m_device.destroySemaphore(m_renderFinishedSemaphore);
+            m_device.destroySemaphore(m_presentFinishedSemaphore);
+            m_device.destroySemaphore(m_imageAvailableSemaphore);
             m_device.destroyFence(m_presentFence);
+            m_device.destroyFence(m_computeFence);
             vmaDestroyBuffer(m_allocator, m_indexBuffer, m_indexBufferAllocation);
             vmaDestroyBuffer(m_allocator, m_vertexBuffer, m_vertexBufferAllocation);
             m_device.destroyCommandPool(m_commandPool);
