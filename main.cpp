@@ -49,7 +49,6 @@ class NBodySimulator {
         VmaAllocation m_stagingBufferAllocation;
         void* m_mappedStagingBuffer;
         uint8_t m_currentState = 0;
-        uint8_t m_nextState = 1;
         vk::Semaphore m_stateReadyForComputeSemaphore;
         vk::Semaphore m_stateReadyForRenderSemaphore;
         vk::Semaphore m_renderFinishedSemaphore;
@@ -673,6 +672,7 @@ class NBodySimulator {
             submitInfo.commandBufferCount = 1;
             submitInfo.pCommandBuffers = &m_computeCommandBuffer;
             m_queue.submit(submitInfo, m_computeFence);
+            m_currentState = (m_currentState + 1) % 2;
         };
     public:
         NBodySimulator() {
