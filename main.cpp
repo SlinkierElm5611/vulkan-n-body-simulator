@@ -17,7 +17,7 @@ VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
 
 #define WINDOW_SIZE 800
 
-#define NUM_TRIANGLES 10
+#define NUM_TRIANGLES 26
 #define NUM_PARTICLES 1000
 
 class NBodySimulator {
@@ -565,18 +565,18 @@ class NBodySimulator {
             for (int i = 0; i < NUM_TRIANGLES; ++i) {
                 indices[i * 3] = i;
                 indices[i * 3 + 1] = (i + 1) % NUM_TRIANGLES;
-                indices[i * 3 + 2] = NUM_TRIANGLES;
+                indices[i * 3 + 2] = NUM_TRIANGLES + 1;
             }
             copyBufferToGPU(indices, NUM_TRIANGLES * 3, m_indexBuffer, m_mappedIndexBuffer);
         };
         void generateBodies(){
-            float positions[NUM_PARTICLES * 2];
-            float velocities[NUM_PARTICLES * 2];
+            float* positions = new float[NUM_PARTICLES * 2];
+            float* velocities = new float[NUM_PARTICLES * 2];
             for (int i = 0; i < NUM_PARTICLES; ++i) {
                 float randomPosXValue = 1.0 - (2.0 * static_cast<float>(rand()) / RAND_MAX);
                 float randomPosYValue = 1.0 - (2.0 * static_cast<float>(rand()) / RAND_MAX);
-                float randomVolXValue = 0.5 - static_cast<float>(rand()) / RAND_MAX;
-                float randomVolYValue = 0.5 - static_cast<float>(rand()) / RAND_MAX;
+                float randomVolXValue = 0.001 - static_cast<float>(rand()) / RAND_MAX;
+                float randomVolYValue = 0.001 - static_cast<float>(rand()) / RAND_MAX;
                 positions[i * 2] = randomPosXValue;
                 positions[i * 2 + 1] = randomPosYValue;
                 velocities[i * 2] = randomVolXValue;
@@ -585,6 +585,8 @@ class NBodySimulator {
             copyBufferToGPU(positions, NUM_PARTICLES * 2, m_bodyPositionBuffers[m_currentState], m_mappedBodyPositionBuffers[m_currentState]);
             copyBufferToGPU(velocities, NUM_PARTICLES * 2, m_bodyVelocityBuffers[m_currentState], m_mappedBodyVelocityBuffers[m_currentState]);
             m_lastTime = std::chrono::high_resolution_clock::now();
+            delete[] positions;
+            delete[] velocities;
         };
         void renderAndPresentCurrentState(){
             m_device.waitForFences(m_presentFence, VK_TRUE, UINT64_MAX);
@@ -648,15 +650,42 @@ class NBodySimulator {
         void computeNextState(){
             float deltaTime = updateTime();
             memcpy(pushConstants, &deltaTime, sizeof(float));
-            // Add push descriptor code
+            vk::DescriptorBufferInfo currentPositionBufferInfo{};
+            currentPositionBufferInfo.buffer = m_bodyPositionBuffers[m_currentState];
+            currentPositionBufferInfo.offset = 0;
+            currentPositionBufferInfo.range = sizeof(float) * 2 * NUM_PARTICLES;
+            vk::DescriptorBufferInfo currentVelocityBufferInfo{};
+            currentVelocityBufferInfo.buffer = m_bodyVelocityBuffers[m_currentState];
+            currentVelocityBufferInfo.offset = 0;
+            currentVelocityBufferInfo.range = sizeof(float) * 2 * NUM_PARTICLES;
+            vk::DescriptorBufferInfo nextPositionBufferInfo{};
+            nextPositionBufferInfo.buffer = m_bodyPositionBuffers[(m_currentState + 1) % 2];
+            nextPositionBufferInfo.offset = 0;
+            nextPositionBufferInfo.range = sizeof(float) * 2 * NUM_PARTICLES;
+            vk::DescriptorBufferInfo nextVelocityBufferInfo{};
+            nextVelocityBufferInfo.buffer = m_bodyVelocityBuffers[(m_currentState + 1) % 2];
+            nextVelocityBufferInfo.offset = 0;
+            nextVelocityBufferInfo.range = sizeof(float) * 2 * NUM_PARTICLES;
+            vk::WriteDescriptorSet descriptorWrites[4];
+            for (uint8_t i = 0; i < 4; i++) {
+                descriptorWrites[i].dstBinding = i;
+                descriptorWrites[i].descriptorType = vk::DescriptorType::eStorageBuffer;
+                descriptorWrites[i].descriptorCount = 1;
+            }
+            descriptorWrites[0].pBufferInfo = &currentPositionBufferInfo;
+            descriptorWrites[1].pBufferInfo = &currentVelocityBufferInfo;
+            descriptorWrites[2].pBufferInfo = &nextPositionBufferInfo;
+            descriptorWrites[3].pBufferInfo = &nextVelocityBufferInfo;
             m_device.waitForFences(m_computeFence, VK_TRUE, UINT64_MAX);
+            std::cout<<"PosX : "<<reinterpret_cast<float*>(m_mappedBodyPositionBuffers[m_currentState])[0]<<" PosY : "<<reinterpret_cast<float*>(m_mappedBodyPositionBuffers[m_currentState])[1]<<std::endl;
+            std::cout<<"VelX : "<<reinterpret_cast<float*>(m_mappedBodyVelocityBuffers[m_currentState])[0]<<" VelY : "<<reinterpret_cast<float*>(m_mappedBodyVelocityBuffers[m_currentState])[1]<<std::endl;
             m_device.resetFences(m_computeFence);
             vk::CommandBufferBeginInfo beginInfo{};
             beginInfo.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit;
             m_computeCommandBuffer.begin(beginInfo);
             m_computeCommandBuffer.bindPipeline(vk::PipelineBindPoint::eCompute, m_computePipeline);
             m_computeCommandBuffer.pushConstants(m_computePipelineLayout, vk::ShaderStageFlagBits::eCompute, 0, sizeof(pushConstants), pushConstants);
-
+            m_computeCommandBuffer.pushDescriptorSetKHR(vk::PipelineBindPoint::eCompute, m_computePipelineLayout, 0, 4, descriptorWrites);
             m_computeCommandBuffer.dispatch(NUM_PARTICLES / 64, 1, 1);
             m_computeCommandBuffer.end();
             vk::SubmitInfo submitInfo{};
@@ -708,8 +737,8 @@ class NBodySimulator {
         void run() {
             while (!glfwWindowShouldClose(m_window)) {
                 glfwPollEvents();
-                //renderAndPresentCurrentState();
-                //computeNextState();
+                renderAndPresentCurrentState();
+                computeNextState();
             }
         }
         ~NBodySimulator() {
