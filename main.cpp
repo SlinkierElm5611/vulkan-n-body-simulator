@@ -17,8 +17,8 @@ VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
 
 #define WINDOW_SIZE 800
 
-#define NUM_TRIANGLES 26
-#define NUM_PARTICLES 64
+#define NUM_TRIANGLES 72
+#define NUM_PARTICLES 3200
 
 class NBodySimulator {
     private:
@@ -527,8 +527,8 @@ class NBodySimulator {
             }
         };
         template<typename T>
-        void copyBufferToGPU(T* data, size_t cout, vk::Buffer dstBuffer, void* mappedBufferPtr){
-            uint32_t size = sizeof(T) * cout;
+        void copyBufferToGPU(T* data, size_t count, vk::Buffer dstBuffer, void* mappedBufferPtr){
+            uint32_t size = sizeof(T) * count;
             if (m_physicalDeviceType == vk::PhysicalDeviceType::eDiscreteGpu) {
                 memcpy(m_mappedStagingBuffer, data, size);
                 vk::CommandBufferBeginInfo beginInfo{};
@@ -678,7 +678,6 @@ class NBodySimulator {
             descriptorWrites[2].pBufferInfo = &nextPositionBufferInfo;
             descriptorWrites[3].pBufferInfo = &nextVelocityBufferInfo;
             m_device.waitForFences(m_computeFence, VK_TRUE, UINT64_MAX);
-            std::cout <<"PosX : " << reinterpret_cast<float*>(m_mappedBodyPositionBuffers[m_currentState])[0] << std::endl << "PosY : " << reinterpret_cast<float*>(m_mappedBodyPositionBuffers[m_currentState])[1] << std::endl;
             m_device.resetFences(m_computeFence);
             vk::CommandBufferBeginInfo beginInfo{};
             beginInfo.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit;

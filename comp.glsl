@@ -23,7 +23,7 @@ layout(push_constant) uniform PushConstant {
     uint particleCount;
 } pushConstant;
 
-#define ATTRACTION_CONSTANT 0.001
+#define ATTRACTION_CONSTANT 0.000001
 
 vec2 computeAttractorForce(vec2 position, vec2 position2) {
     vec2 diff = position2 - position;
@@ -36,7 +36,7 @@ vec2 computeAttractorForce(vec2 position, vec2 position2) {
 }
 
 void main() {
-    uint globalIndex = gl_GlobalInvocationID.y * gl_NumWorkGroups.x + gl_GlobalInvocationID.x;
+    uint globalIndex = gl_GlobalInvocationID.x + gl_GlobalInvocationID.y * gl_NumWorkGroups.x * gl_WorkGroupSize.x;
     if (globalIndex >= pushConstant.particleCount) {
         return;
     }
