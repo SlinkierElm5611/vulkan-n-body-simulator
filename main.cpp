@@ -18,7 +18,7 @@ VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
 #define WINDOW_SIZE 800
 
 #define NUM_TRIANGLES 26
-#define NUM_PARTICLES 1000
+#define NUM_PARTICLES 64
 
 class NBodySimulator {
     private:
@@ -417,7 +417,7 @@ class NBodySimulator {
             rasterizer.rasterizerDiscardEnable = VK_FALSE;
             rasterizer.polygonMode = vk::PolygonMode::eFill;
             rasterizer.lineWidth = 1.0f;
-            rasterizer.cullMode = vk::CullModeFlagBits::eBack;
+            rasterizer.cullMode = vk::CullModeFlagBits::eNone;
             rasterizer.frontFace = vk::FrontFace::eCounterClockwise;
             rasterizer.depthBiasEnable = VK_FALSE;
             rasterizer.depthBiasConstantFactor = 0.0f;
@@ -643,9 +643,10 @@ class NBodySimulator {
         };
         float updateTime(){
             auto currentTime = std::chrono::high_resolution_clock::now();
-            auto elapsedTime = std::chrono::duration_cast<std::chrono::milliseconds>(currentTime - m_lastTime).count();
+            auto elapsedTime = std::chrono::duration_cast<std::chrono::microseconds>(currentTime - m_lastTime).count();
             m_lastTime = currentTime;
-            return elapsedTime / 1000.0f;
+            glfwSetWindowTitle(m_window, std::to_string(static_cast<uint32_t>(1/(elapsedTime / 1000000.0f))).c_str());
+            return elapsedTime / 1000000.0f;
         };
         void computeNextState(){
             float deltaTime = updateTime();
@@ -677,6 +678,7 @@ class NBodySimulator {
             descriptorWrites[2].pBufferInfo = &nextPositionBufferInfo;
             descriptorWrites[3].pBufferInfo = &nextVelocityBufferInfo;
             m_device.waitForFences(m_computeFence, VK_TRUE, UINT64_MAX);
+            std::cout <<"PosX : " << reinterpret_cast<float*>(m_mappedBodyPositionBuffers[m_currentState])[0] << std::endl << "PosY : " << reinterpret_cast<float*>(m_mappedBodyPositionBuffers[m_currentState])[1] << std::endl;
             m_device.resetFences(m_computeFence);
             vk::CommandBufferBeginInfo beginInfo{};
             beginInfo.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit;
