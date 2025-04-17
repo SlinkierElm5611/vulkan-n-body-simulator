@@ -15,10 +15,10 @@
 
 VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
 
-#define WINDOW_SIZE 800
+#define WINDOW_SIZE 1000
 
-#define NUM_TRIANGLES 72
-#define NUM_PARTICLES 3200
+#define NUM_TRIANGLES 10
+#define NUM_PARTICLES 6400
 
 class NBodySimulator {
     private:
@@ -133,11 +133,20 @@ class NBodySimulator {
             features12.setTimelineSemaphore(VK_TRUE);
             vk::PhysicalDeviceFeatures2 features{};
             features.setPNext(&features12);
-            std::vector<const char*> deviceExtensions = {
+            std::vector<const char*> requestedDeviceExtensions = {
                 VK_KHR_SWAPCHAIN_EXTENSION_NAME,
                 VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME,
                 "VK_KHR_portability_subset",
             };
+            std::vector<const char*> deviceExtensions;
+            for (const auto& requestedDeviceExtension : requestedDeviceExtensions) {
+                for (const auto& availableDeviceExtension : m_physicalDevice.enumerateDeviceExtensionProperties()) {
+                    if (strcmp(requestedDeviceExtension, availableDeviceExtension.extensionName) == 0) {
+                        deviceExtensions.push_back(requestedDeviceExtension);
+                        break;
+                    }
+                }
+            }
             std::vector<vk::DeviceQueueCreateInfo> queueCreateInfos;
             std::vector<float> queuePriorities = {1.0f};
             std::vector<vk::PhysicalDeviceFeatures> deviceFeatures;
@@ -290,7 +299,7 @@ class NBodySimulator {
             vk::DescriptorSetLayoutCreateInfo createInfo{};
             createInfo.bindingCount = 4;
             createInfo.pBindings = bindings;
-            createInfo.flags = vk::DescriptorSetLayoutCreateFlagBits::ePushDescriptor;
+            createInfo.flags = vk::DescriptorSetLayoutCreateFlagBits::ePushDescriptorKHR;
             m_computeDescriptorSetLayout = m_device.createDescriptorSetLayout(createInfo);
         };
         void createComputePipelineLayout(){
@@ -589,7 +598,7 @@ class NBodySimulator {
             delete[] velocities;
         };
         void renderAndPresentCurrentState(){
-            m_device.waitForFences(m_presentFence, VK_TRUE, UINT64_MAX);
+            m_device.waitForFences(1, &m_presentFence, VK_TRUE, UINT64_MAX);
             m_device.resetFences(m_presentFence);
             uint32_t imageIndex = m_device.acquireNextImageKHR(m_swapChain, UINT64_MAX, m_imageAvailableSemaphore, nullptr).value;
             vk::CommandBufferBeginInfo beginInfo{};
@@ -614,7 +623,7 @@ class NBodySimulator {
             m_graphicsCommandBuffer.drawIndexed(NUM_TRIANGLES * 3, NUM_PARTICLES, 0, 0, 0);
             m_graphicsCommandBuffer.endRenderPass();
             m_graphicsCommandBuffer.end();
-            vk::PipelineStageFlags waitStages[] = {vk::PipelineStageFlagBits::eColorAttachmentOutput};
+            vk::PipelineStageFlags waitStages[] = {vk::PipelineStageFlagBits::eColorAttachmentOutput, vk::PipelineStageFlagBits::eColorAttachmentOutput};
             vk::SubmitInfo submitInfo{};
             vk::Semaphore waitSemaphores[] = {m_imageAvailableSemaphore, m_stateReadyForRenderSemaphore};
             if (m_isFirstDraw){
@@ -677,7 +686,7 @@ class NBodySimulator {
             descriptorWrites[1].pBufferInfo = &currentVelocityBufferInfo;
             descriptorWrites[2].pBufferInfo = &nextPositionBufferInfo;
             descriptorWrites[3].pBufferInfo = &nextVelocityBufferInfo;
-            m_device.waitForFences(m_computeFence, VK_TRUE, UINT64_MAX);
+            m_device.waitForFences(1, &m_computeFence, VK_TRUE, UINT64_MAX);
             m_device.resetFences(m_computeFence);
             vk::CommandBufferBeginInfo beginInfo{};
             beginInfo.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit;
