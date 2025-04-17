@@ -68,8 +68,8 @@ void main() {
         hitEdge = true;
     }
     if (hitEdge) {
-        velocity.x *= -0.05;
-        velocity.y *= -0.05;
+        velocity.x *= -0.005;
+        velocity.y *= -0.005;
     }
     NewVelocities[globalIndex] = velocity;
     NewPositions[globalIndex] = position;
