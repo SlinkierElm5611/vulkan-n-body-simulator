@@ -6,5 +6,5 @@ layout (location = 1) in vec2 inPosition;
 #define RADIUS 0.0075f
 
 void main() {
-    gl_Position = vec4(((RADIUS * inVertex) + inPosition), 0.0, 1.0);
+    gl_Position = vec4(((RADIUS * inVertex) + (inPosition/10)), 0.0, 1.0);
     }

@@ -18,7 +18,7 @@ VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
 #define WINDOW_SIZE 1000
 
 #define NUM_TRIANGLES 6
-#define NUM_PARTICLES 10240
+#define NUM_PARTICLES 30720
 
 class NBodySimulator {
     private:
@@ -584,8 +584,8 @@ class NBodySimulator {
             for (int i = 0; i < NUM_PARTICLES; ++i) {
                 float randomPosXValue = 1.0 - (2.0 * static_cast<float>(rand()) / RAND_MAX);
                 float randomPosYValue = 1.0 - (2.0 * static_cast<float>(rand()) / RAND_MAX);
-                float randomVolXValue = 0.02 - (0.04 * static_cast<float>(rand()) / RAND_MAX);
-                float randomVolYValue = 0.02 - (0.04 * static_cast<float>(rand()) / RAND_MAX);
+                float randomVolXValue = 0.25 - (0.5 * static_cast<float>(rand()) / RAND_MAX);
+                float randomVolYValue = 0.25 - (0.5 * static_cast<float>(rand()) / RAND_MAX);
                 positions[i * 2] = randomPosXValue;
                 positions[i * 2 + 1] = randomPosYValue;
                 velocities[i * 2] = randomVolXValue;

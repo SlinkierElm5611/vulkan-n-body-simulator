@@ -28,7 +28,7 @@ layout(push_constant) uniform PushConstant {
 vec2 computeAttractorForce(vec2 position, vec2 position2) {
     vec2 diff = position2 - position;
     float distance = length(diff);
-    if (distance > 0.0) {
+    if (distance > 0.01) {
         float forceMagnitude = ATTRACTION_CONSTANT / (distance * distance);
         return normalize(diff) * forceMagnitude;
     }
@@ -42,7 +42,7 @@ void main() {
     }
     vec2 position = positions[globalIndex];
     vec2 velocity = velocities[globalIndex];
-    vec2 force = vec2(0.0, 0.0);
+    vec2 force = 1000 * computeAttractorForce(position, vec2(0,0));
     for(uint i = 0; i < pushConstant.particleCount; i++) {
         if (i == globalIndex) {
             continue;
@@ -50,27 +50,8 @@ void main() {
         vec2 position2 = positions[i];
         force += computeAttractorForce(position, position2);
     }
-    bool hitEdge = false;
     velocity += force * pushConstant.deltaTime;
     position += velocity * pushConstant.deltaTime;
-    if (position.x < -1.0) {
-        position.x = -1.0;
-        hitEdge = true;
-    } else if (position.x > 1.0) {
-        position.x = 1.0;
-        hitEdge = true;
-    }
-    if (position.y < -1.0) {
-        position.y = -1.0;
-        hitEdge = true;
-    } else if (position.y > 1.0) {
-        position.y = 1.0;
-        hitEdge = true;
-    }
-    if (hitEdge) {
-        velocity.x *= -0.005;
-        velocity.y *= -0.005;
-    }
     NewVelocities[globalIndex] = velocity;
     NewPositions[globalIndex] = position;
 }
