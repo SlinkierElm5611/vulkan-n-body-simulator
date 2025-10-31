@@ -18,7 +18,7 @@ VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
 #define WINDOW_SIZE 1000
 
 #define NUM_TRIANGLES 6
-#define NUM_PARTICLES 30720
+#define NUM_PARTICLES 61440
 
 class NBodySimulator {
     private:
@@ -95,7 +95,7 @@ class NBodySimulator {
             std::vector<const char*> instanceExtensions(glfwExtensions, glfwExtensions + glfwExtensionCount);
             instanceExtensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
             std::vector<const char*> instanceLayers = {
-                "VK_LAYER_KHRONOS_validation",
+                //"VK_LAYER_KHRONOS_validation",
             };
             vk::InstanceCreateInfo createInfo{};
             createInfo.pApplicationInfo = &appInfo;
