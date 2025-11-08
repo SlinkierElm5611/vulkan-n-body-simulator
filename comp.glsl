@@ -46,7 +46,7 @@ void main() {
     }
     vec2 position = positions[globalIndex];
     vec2 velocity = velocities[globalIndex];
-    vec2 force = 1000 * computeAttractorForce(position, vec2(0,0));
+    vec2 force = vec2(0.0f);
     for(uint i = 0; i < pushConstant.particleCount/64 + 1; i++){
         positionsShared[localIndex] = positions[i * 64 + localIndex];
         velocitiesShared[localIndex] = velocities[i * 64 + localIndex];
