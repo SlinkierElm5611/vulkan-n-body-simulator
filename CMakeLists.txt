@@ -12,6 +12,7 @@ add_custom_target(shaders
     COMMAND glslc -fshader-stage=vertex -o vert.spv vert.glsl
     COMMAND glslc -fshader-stage=fragment -o frag.spv frag.glsl
     COMMAND glslc -fshader-stage=compute -o comp.spv comp.glsl
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
     DEPENDS vert.glsl frag.glsl comp.glsl
     BYPRODUCTS vert.spv frag.spv comp.spv
 )
@@ -22,6 +23,7 @@ add_custom_target(shaders_headers
     COMMAND xxd -i vert.spv > vert.h
     COMMAND xxd -i frag.spv > frag.h
     COMMAND xxd -i comp.spv > comp.h
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
     DEPENDS shaders
     BYPRODUCTS vert.h frag.h comp.h
 )
