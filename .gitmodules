@@ -1,3 +1,6 @@
 [submodule "VulkanMemoryAllocator"]
 	path = VulkanMemoryAllocator
 	url = git@github.com:GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator.git
+[submodule "GLFW"]
+	path = GLFW
+	url = https://github.com/glfw/glfw.git

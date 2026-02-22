@@ -26,11 +26,11 @@ add_custom_target(shaders_headers
     BYPRODUCTS vert.h frag.h comp.h
 )
 
-find_package(glfw3 REQUIRED)
-
 find_package(Vulkan REQUIRED)
 
 add_subdirectory(VulkanMemoryAllocator)
+
+add_subdirectory(GLFW)
 
 add_executable(n-body-simulator main.cpp ${SHADER_HEADERS})
 
