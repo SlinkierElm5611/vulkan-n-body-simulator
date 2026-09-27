@@ -1,6 +1,9 @@
 #version 450
 
-layout(local_size_x = 8, local_size_y = 8) in;
+// One invocation per body. Each workgroup walks all bodies one tile at a time: every invocation loads one position of
+// the tile into shared memory, then all of them read the whole tile from there instead of from the buffer.
+#define TILE_SIZE 128
+layout(local_size_x = TILE_SIZE) in;
 
 layout(binding = 0) buffer CurrentPositionBuffer{
     vec2 positions[];
@@ -24,32 +27,43 @@ layout(push_constant) uniform PushConstant {
 } pushConstant;
 
 #define ATTRACTION_CONSTANT 0.000001
+// Plummer softening length: closer pairs attract more weakly instead of not at all, so the force has no jump for a
+// close pass to turn into a slingshot.
+#define SOFTENING 0.01
+
+shared vec2 tilePositions[TILE_SIZE];
 
 vec2 computeAttractorForce(vec2 position, vec2 position2) {
     vec2 diff = position2 - position;
-    float distance = length(diff);
-    if (distance > 0.01) {
-        float forceMagnitude = ATTRACTION_CONSTANT / (distance * distance);
-        return normalize(diff) * forceMagnitude;
-    }
-    return vec2(0.0, 0.0);
+    float inverseDistance = inversesqrt(dot(diff, diff) + SOFTENING * SOFTENING);
+    // Zero for a body and itself, where diff is 0.
+    return diff * (ATTRACTION_CONSTANT * inverseDistance * inverseDistance * inverseDistance);
 }
 
 void main() {
-    uint globalIndex = gl_GlobalInvocationID.x + gl_GlobalInvocationID.y * gl_NumWorkGroups.x * gl_WorkGroupSize.x;
-    if (globalIndex >= pushConstant.particleCount) {
+    uint globalIndex = gl_GlobalInvocationID.x;
+    uint localIndex = gl_LocalInvocationID.x;
+    // Invocations past the last body still load tiles and reach every barrier(), they just don't write a result.
+    bool isBody = globalIndex < pushConstant.particleCount;
+    vec2 position = isBody ? positions[globalIndex] : vec2(0.0, 0.0);
+    vec2 force = 1000 * computeAttractorForce(position, vec2(0,0));
+    for (uint tileStart = 0; tileStart < pushConstant.particleCount; tileStart += TILE_SIZE) {
+        uint loadIndex = tileStart + localIndex;
+        if (loadIndex < pushConstant.particleCount) {
+            tilePositions[localIndex] = positions[loadIndex];
+        }
+        barrier();
+        uint tileCount = min(uint(TILE_SIZE), pushConstant.particleCount - tileStart);
+        for (uint i = 0; i < tileCount; i++) {
+            force += computeAttractorForce(position, tilePositions[i]);
+        }
+        // Every invocation is done with this tile before the next one overwrites it.
+        barrier();
+    }
+    if (!isBody) {
         return;
     }
-    vec2 position = positions[globalIndex];
     vec2 velocity = velocities[globalIndex];
-    vec2 force = 1000 * computeAttractorForce(position, vec2(0,0));
-    for(uint i = 0; i < pushConstant.particleCount; i++) {
-        if (i == globalIndex) {
-            continue;
-        }
-        vec2 position2 = positions[i];
-        force += computeAttractorForce(position, position2);
-    }
     velocity += force * pushConstant.deltaTime;
     position += velocity * pushConstant.deltaTime;
     NewVelocities[globalIndex] = velocity;

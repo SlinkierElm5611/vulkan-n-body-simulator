@@ -1,7 +1,7 @@
 #include <iostream>
 #include <vector>
+#include <algorithm>
 #include <cmath>
-#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <numbers>
@@ -37,6 +37,14 @@ static const uint32_t particleFragSpirv[] =
 #define NUM_TRIANGLES 12
 #define NUM_PARTICLES 30720
 
+// Simulated seconds per compute step. Fixed, so the simulation doesn't depend on the frame rate.
+#define FIXED_TIME_STEP (1.0 / 240.0)
+// A frame longer than this many steps (a stall, a suspend, a GPU that can't keep up) slows the simulation down
+// instead of being caught up with ever more steps.
+#define MAX_STEPS_PER_FRAME 8
+// TILE_SIZE in simulate.comp, its workgroup size.
+#define SIMULATION_GROUP_SIZE 128
+
 // Matches the push_constant block in simulate.comp.
 struct SimulationPushConstants {
     float deltaTime;
@@ -47,6 +55,7 @@ class NBodySimulator {
     private:
         // Declared first so it is destroyed last, after the destructor has released the swapchain and the window.
         PixelKiln m_kiln;
+        PresentMode m_presentMode;
         GLFWwindow* m_window = nullptr;
         uint64_t m_swapchain = 0;
         SwapchainInfo m_swapchainInfo{};
@@ -56,9 +65,12 @@ class NBodySimulator {
         uint64_t m_indexBuffer = 0;
         uint64_t m_bodyPositionBuffers[2] = {0, 0};
         uint64_t m_bodyVelocityBuffers[2] = {0, 0};
-        std::chrono::time_point<std::chrono::high_resolution_clock> m_lastTime;
+        double m_lastTime = 0.0;
+        double m_accumulatedTime = 0.0; // elapsed time not simulated yet, less than FIXED_TIME_STEP between frames
+        double m_frameRateTime = 0.0;
+        uint32_t m_frameRateFrames = 0;
         uint8_t m_currentState = 0;
-        SimulationPushConstants m_pushConstants = {0.0f, NUM_PARTICLES};
+        SimulationPushConstants m_pushConstants = {static_cast<float>(FIXED_TIME_STEP), NUM_PARTICLES};
         static Config createConfig() {
             Config config{};
             config.applicationName = "NBodySimulator";
@@ -98,7 +110,7 @@ class NBodySimulator {
             desc.width = static_cast<uint32_t>(framebufferWidth);
             desc.height = static_cast<uint32_t>(framebufferHeight);
             desc.format = IMAGE_FORMAT_BGRA8_SRGB;
-            desc.presentMode = PRESENT_MODE_VSYNC;
+            desc.presentMode = m_presentMode;
             m_swapchain = m_kiln.createSwapchain(getNativeWindow(), desc);
             m_swapchainInfo = m_kiln.getSwapchainInfo(m_swapchain);
         }
@@ -169,17 +181,35 @@ class NBodySimulator {
             }
             m_kiln.uploadBuffer(m_bodyPositionBuffers[m_currentState], positions.data(), sizeof(float) * positions.size());
             m_kiln.uploadBuffer(m_bodyVelocityBuffers[m_currentState], velocities.data(), sizeof(float) * velocities.size());
-            m_lastTime = std::chrono::high_resolution_clock::now();
+            m_lastTime = glfwGetTime();
         };
-        float updateTime(){
-            auto currentTime = std::chrono::high_resolution_clock::now();
-            auto elapsedTime = std::chrono::duration_cast<std::chrono::microseconds>(currentTime - m_lastTime).count();
+        // Seconds since the previous call, from GLFW's monotonic clock.
+        double updateTime(){
+            double currentTime = glfwGetTime();
+            double elapsedTime = currentTime - m_lastTime;
             m_lastTime = currentTime;
-            glfwSetWindowTitle(m_window, std::to_string(static_cast<uint32_t>(1/(elapsedTime / 1000000.0f))).c_str());
-            return elapsedTime / 1000000.0f;
+            return elapsedTime;
         };
-        void computeNextState(float deltaTime){
-            m_pushConstants.deltaTime = deltaTime;
+        // Averaged over half a second: a per frame value is unreadable, and setting the title is a round trip to the
+        // window system, which adds up without vsync.
+        void updateFrameRate(double elapsedTime){
+            m_frameRateTime += elapsedTime;
+            m_frameRateFrames++;
+            if (m_frameRateTime >= 0.5) {
+                glfwSetWindowTitle(m_window, std::to_string(std::lround(m_frameRateFrames / m_frameRateTime)).c_str());
+                m_frameRateTime = 0.0;
+                m_frameRateFrames = 0;
+            }
+        };
+        // Records the fixed steps the elapsed time covers, the remainder carries over to the next frame.
+        void advanceSimulation(double elapsedTime){
+            m_accumulatedTime += std::min(elapsedTime, MAX_STEPS_PER_FRAME * FIXED_TIME_STEP);
+            while (m_accumulatedTime >= FIXED_TIME_STEP) {
+                computeNextState();
+                m_accumulatedTime -= FIXED_TIME_STEP;
+            }
+        };
+        void computeNextState(){
             uint8_t nextState = (m_currentState + 1) % 2;
             ProgramCall call{};
             call.type = PROGRAM_TYPE_COMPUTE;
@@ -191,7 +221,7 @@ class NBodySimulator {
                 {.resource = m_bodyVelocityBuffers[nextState]},
             };
             call.pushConstants = &m_pushConstants;
-            call.groupCountX = (NUM_PARTICLES / 64) + 1;
+            call.groupCountX = (NUM_PARTICLES + SIMULATION_GROUP_SIZE - 1) / SIMULATION_GROUP_SIZE;
             call.debugLabel = "Simulate";
             m_kiln.record(call);
             m_currentState = nextState;
@@ -210,7 +240,7 @@ class NBodySimulator {
             m_kiln.record(call);
         };
     public:
-        NBodySimulator() : m_kiln(createConfig()) {
+        explicit NBodySimulator(PresentMode presentMode) : m_kiln(createConfig()), m_presentMode(presentMode) {
             createWindow();
             createSwapchain();
             createBuffers();
@@ -224,16 +254,17 @@ class NBodySimulator {
             while (!glfwWindowShouldClose(m_window)) {
                 glfwPollEvents();
                 uint64_t image = m_kiln.acquireSwapchainImage(m_swapchain);
-                // Measured every iteration, so time spent without an image doesn't become one huge step.
-                float deltaTime = updateTime();
+                // Measured every iteration, so time spent without an image isn't simulated afterwards.
+                double elapsedTime = updateTime();
                 if (image == 0) {
                     // Nothing to draw into (e.g. minimized): the simulation pauses too.
                     glfwWaitEventsTimeout(0.1);
                     continue;
                 }
-                computeNextState(deltaTime);
-                // The step is submitted on its own, before the draw is recorded: the draw's submission waits for the
-                // window to release the swapchain image, the step doesn't have to.
+                updateFrameRate(elapsedTime);
+                advanceSimulation(elapsedTime);
+                // The steps are submitted together, before the draw is recorded: the draw's submission waits for the
+                // window to release the swapchain image, the steps don't have to.
                 m_kiln.flush();
                 renderCurrentState(image);
                 m_kiln.present(m_swapchain);
@@ -255,9 +286,19 @@ class NBodySimulator {
         }
 };
 
-int main() {
+int main(int argc, char** argv) {
+    // --no-vsync presents without waiting for the display (where supported), to see how fast it can run.
+    PresentMode presentMode = PRESENT_MODE_VSYNC;
+    for (int i = 1; i < argc; ++i) {
+        if (std::string(argv[i]) == "--no-vsync") {
+            presentMode = PRESENT_MODE_IMMEDIATE;
+        } else {
+            std::cerr << "Unknown argument " << argv[i] << ", usage: " << argv[0] << " [--no-vsync]" << std::endl;
+            return EXIT_FAILURE;
+        }
+    }
     try {
-        NBodySimulator nBodySimulator;
+        NBodySimulator nBodySimulator(presentMode);
         nBodySimulator.run();
     } catch (const std::exception& e) {
         std::cerr << e.what() << std::endl;
